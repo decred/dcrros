@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -20,10 +22,25 @@ const (
 	cnSimNet  chainNetwork = "simnet"
 )
 
+// defaultListenPort is the default port to use with net.JoinHostPort().
+func (c chainNetwork) defaultListenPort() string {
+	switch c {
+	case cnMainNet:
+		return "9128"
+	case cnTestNet:
+		return "19128"
+	case cnSimNet:
+		return "29128"
+	default:
+		panic("unknown chainNetwork")
+	}
+}
+
 const (
 	defaultConfigFilename = "dcrros.conf"
 	defaultLogLevel       = "info"
 	defaultActiveNet      = cnMainNet
+	defaultBindAddr       = ":8088"
 )
 
 var (
@@ -31,12 +48,15 @@ var (
 	defaultDataDir    = filepath.Join(defaultConfigDir, "data")
 	defaultLogDir     = filepath.Join(defaultConfigDir, "logs", string(defaultActiveNet))
 	defaultConfigFile = filepath.Join(defaultConfigDir, defaultConfigFilename)
+
+	errCmdDone = errors.New("cmd is done while parsing config options")
 )
 
 type config struct {
 	ShowVersion bool `short:"V" long:"version" description:"Display version information and exit"`
 
-	ConfigFile string `short:"C" long:"configfile" description:"Path to configuration file"`
+	ConfigFile string   `short:"C" long:"configfile" description:"Path to configuration file"`
+	Listeners  []string `long:"listen" description:"Add an interface/port to listen for connections (default all interfaces port: 9128, testnet: 19128, simnet: 29128)"`
 
 	// Network
 	MainNet bool `long:"mainnet" description:"Use the main network"`
@@ -48,14 +68,25 @@ type config struct {
 	activeNet chainNetwork
 }
 
-// normalizeNetwork returns the common name of a network type used to create
-// file paths. This allows differently versioned networks to use the same path.
-func normalizeNetwork(network string) string {
-	if strings.HasPrefix(network, "testnet") {
-		return "testnet"
+// listeners returns the interface listeners where connections to the http
+// server should be accepted.
+func (c *config) listeners() ([]net.Listener, error) {
+	var list []net.Listener
+	for _, addr := range c.Listeners {
+		l, err := net.Listen("tcp", addr)
+		if err != nil {
+			// Cancel listening on the other addresses since we'll
+			// return an error.
+			for _, l := range list {
+				// Ignore close errors since we'll be returning
+				// an error anyway.
+				l.Close()
+			}
+			return nil, fmt.Errorf("unable to listen on %s: %v", addr, err)
+		}
+		list = append(list, l)
 	}
-
-	return network
+	return list, nil
 }
 
 func loadConfig() (*config, []string, error) {
@@ -72,7 +103,7 @@ func loadConfig() (*config, []string, error) {
 	if err != nil {
 		if e, ok := err.(*flags.Error); ok && e.Type == flags.ErrHelp {
 			fmt.Fprintln(os.Stderr, err)
-			return nil, nil, err
+			return nil, nil, errCmdDone
 		}
 	}
 
@@ -84,7 +115,7 @@ func loadConfig() (*config, []string, error) {
 		fmt.Printf("%s version %s (Go version %s %s/%s)\n",
 			appName, version.String(),
 			runtime.Version(), runtime.GOOS, runtime.GOARCH)
-		os.Exit(0)
+		return nil, nil, errCmdDone
 	}
 
 	// If the config file path has not been modified by user, then
@@ -166,8 +197,18 @@ func loadConfig() (*config, []string, error) {
 	// the logger variables may be used.
 	logDir := strings.Replace(defaultLogDir, string(defaultActiveNet),
 		string(cfg.activeNet), 1)
-	initLogRotator(logDir)
+	logPath := filepath.Join(logDir, "dcrros.log")
+	initLogRotator(logPath)
 	setLogLevels(defaultLogLevel)
+
+	// Add the default listener if none were specified. The default
+	// listener is all addresses on the listen port for the network we are
+	// to connect to.
+	if len(cfg.Listeners) == 0 {
+		cfg.Listeners = []string{
+			net.JoinHostPort("", cfg.activeNet.defaultListenPort()),
+		}
+	}
 
 	// Warn about missing config file only after all other configuration is
 	// done.  This prevents the warning on help messages and invalid
