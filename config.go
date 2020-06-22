@@ -9,7 +9,9 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrros/backend"
 	"github.com/decred/dcrros/internal/version"
 	"github.com/jessevdk/go-flags"
 )
@@ -87,6 +89,24 @@ func (c *config) listeners() ([]net.Listener, error) {
 		list = append(list, l)
 	}
 	return list, nil
+}
+
+func (c *config) serverConfig() (*backend.ServerConfig, error) {
+	var chain *chaincfg.Params
+	switch c.activeNet {
+	case cnMainNet:
+		chain = chaincfg.MainNetParams()
+	case cnTestNet:
+		chain = chaincfg.TestNet3Params()
+	case cnSimNet:
+		chain = chaincfg.SimNetParams()
+	default:
+		return nil, fmt.Errorf("unknown active net: %s", c.activeNet)
+	}
+
+	return &backend.ServerConfig{
+		ChainParams: chain,
+	}, nil
 }
 
 func loadConfig() (*config, []string, error) {

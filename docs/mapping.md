@@ -13,7 +13,7 @@ RTA Account => DCR Address
 - [ ] /construction/submit
 - [ ] /mempool
 - [ ] /mempool/transaction
-- [ ] /network/list
+- [x] /network/list
 - [ ] /network/options
 - [ ] /network/status
 

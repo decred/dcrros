@@ -19,6 +19,12 @@ var shutdownRequestChannel = make(chan struct{})
 // shutdown.  This may be modified during init depending on the platform.
 var interruptSignals = []os.Signal{os.Interrupt}
 
+// requestShutdown requests the process to end. It blocks until the shutdown
+// process signal is received.
+func requestShutdown() {
+	shutdownRequestChannel <- struct{}{}
+}
+
 // shutdownListener listens for OS Signals such as SIGINT (Ctrl+C) and shutdown
 // requests from shutdownRequestChannel.  It returns a context that is canceled
 // when either signal is received.
