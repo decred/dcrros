@@ -14,8 +14,8 @@ RTA Account => DCR Address
 - [ ] /mempool
 - [ ] /mempool/transaction
 - [x] /network/list
-- [ ] /network/options
-- [ ] /network/status
+- [x] /network/options
+- [x] /network/status
 
 
 

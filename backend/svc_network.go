@@ -7,6 +7,7 @@ import (
 	rserver "github.com/coinbase/rosetta-sdk-go/server"
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrros/internal/version"
+	"github.com/decred/dcrros/types"
 )
 
 // Compile time directive to ensure Server implements the NetworkAPIServicer
@@ -53,13 +54,38 @@ func (s *Server) NetworkOptions(context.Context, *rtypes.NetworkRequest) (
 	}, nil
 }
 
-func (s *Server) NetworkStatus(context.Context, *rtypes.NetworkRequest) (
+// NetworkStatus returns the current status of the chain as seen by dcrros and
+// the underlying dcrd.
+//
+// This is part of the NetworkAPIServicer interface.
+func (s *Server) NetworkStatus(ctx context.Context, req *rtypes.NetworkRequest) (
 	*rtypes.NetworkStatusResponse, *rtypes.Error) {
 
+	// We need the timestamp of the block, so request the best block hash
+	// then the block.
+	hash, err := s.c.GetBestBlockHash(ctx)
+	if err != nil {
+		return nil, types.DcrdError(err)
+	}
+
+	block, err := s.c.GetBlock(ctx, hash)
+	if err != nil {
+		return nil, types.DcrdError(err)
+	}
+
+	// Rosetta timestamp is in milliseconds.
+	timestamp := block.Header.Timestamp.Unix() * 1000
 	return &rtypes.NetworkStatusResponse{
-		CurrentBlockIdentifier: nil,
-		CurrentBlockTimestamp:  0,
-		GenesisBlockIdentifier: nil,
-		Peers:                  nil,
+		CurrentBlockIdentifier: &rtypes.BlockIdentifier{
+			Hash:  hash.String(),
+			Index: int64(block.Header.Height),
+		},
+		CurrentBlockTimestamp: timestamp,
+		GenesisBlockIdentifier: &rtypes.BlockIdentifier{
+			Hash: s.chainParams.GenesisHash.String(),
+		},
+
+		// TODO: syncing peers?
+		Peers: nil,
 	}, nil
 }
