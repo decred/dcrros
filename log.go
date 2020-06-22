@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/decred/dcrros/backend"
 	"github.com/decred/slog"
 	"github.com/jrick/logrotate/rotator"
 )
@@ -42,16 +43,19 @@ var (
 	// application shutdown.
 	logRotator *rotator.Rotator
 
-	log = backendLog.Logger("DROS")
+	log     = backendLog.Logger("DROS")
+	srvrLog = backendLog.Logger("SRVR")
 )
 
 // Initialize package-global logger variables.
 func init() {
+	backend.UseLogger(srvrLog)
 }
 
 // subsystemLoggers maps each subsystem identifier to its associated logger.
 var subsystemLoggers = map[string]slog.Logger{
 	"DROS": log,
+	"SRVR": srvrLog,
 }
 
 // initLogRotator initializes the logging rotater to write logs to logFile and

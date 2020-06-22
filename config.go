@@ -1,16 +1,20 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/rpcclient/v6"
 	"github.com/decred/dcrros/backend"
 	"github.com/decred/dcrros/internal/version"
 	"github.com/jessevdk/go-flags"
@@ -38,6 +42,21 @@ func (c chainNetwork) defaultListenPort() string {
 	}
 }
 
+// defaultDcrdCfg returns the default rpc connect address for the given
+// network.
+func (c chainNetwork) defaultDcrdRPCConnect() string {
+	switch c {
+	case cnMainNet:
+		return "localhost:9109"
+	case cnTestNet:
+		return "localhost:19109"
+	case cnSimNet:
+		return "localhost:19556"
+	default:
+		panic("unknown chainNetwork")
+	}
+}
+
 const (
 	defaultConfigFilename = "dcrros.conf"
 	defaultLogLevel       = "info"
@@ -46,10 +65,12 @@ const (
 )
 
 var (
-	defaultConfigDir  = dcrutil.AppDataDir("dcrros", false)
-	defaultDataDir    = filepath.Join(defaultConfigDir, "data")
-	defaultLogDir     = filepath.Join(defaultConfigDir, "logs", string(defaultActiveNet))
-	defaultConfigFile = filepath.Join(defaultConfigDir, defaultConfigFilename)
+	defaultConfigDir    = dcrutil.AppDataDir("dcrros", false)
+	defaultDataDir      = filepath.Join(defaultConfigDir, "data")
+	defaultLogDir       = filepath.Join(defaultConfigDir, "logs", string(defaultActiveNet))
+	defaultConfigFile   = filepath.Join(defaultConfigDir, defaultConfigFilename)
+	defaultDcrdDir      = dcrutil.AppDataDir("dcrd", false)
+	defaultDcrdCertPath = filepath.Join(defaultDcrdDir, "rpc.cert")
 
 	errCmdDone = errors.New("cmd is done while parsing config options")
 )
@@ -61,9 +82,18 @@ type config struct {
 	Listeners  []string `long:"listen" description:"Add an interface/port to listen for connections (default all interfaces port: 9128, testnet: 19128, simnet: 29128)"`
 
 	// Network
+
 	MainNet bool `long:"mainnet" description:"Use the main network"`
 	TestNet bool `long:"testnet" description:"Use the test network"`
 	SimNet  bool `long:"simnet" description:"Use the simulation test network"`
+
+	// Dcrd Connection Options
+
+	DcrdConnect   string `short:"c" long:"dcrdconnect" description:"Network address of the RPC interface of the dcrd node to connect to (default: localhost port 9109, testnet: 19109, simnet: 19556)"`
+	DcrdCertPath  string `long:"dcrdcertpath" description:"File path location of the dcrd RPC certificate"`
+	DcrdCertBytes string `long:"dcrdcertbytes" description:"The pem-encoded RPC certificate for dcrd"`
+	DcrdUser      string `short:"u" long:"dcrduser" description:"RPC username to authenticate with dcrd"`
+	DcrdPass      string `short:"P" long:"dcrdpass" description:"RPC password to authenticate with dcrd"`
 
 	// The rest of the members of this struct are filled by loadConfig().
 
@@ -91,6 +121,16 @@ func (c *config) listeners() ([]net.Listener, error) {
 	return list, nil
 }
 
+func (c *config) dcrdConnConfig() *rpcclient.ConnConfig {
+	return &rpcclient.ConnConfig{
+		Host:         c.DcrdConnect,
+		Endpoint:     "ws",
+		User:         c.DcrdUser,
+		Pass:         c.DcrdPass,
+		Certificates: []byte(c.DcrdCertBytes),
+	}
+}
+
 func (c *config) serverConfig() (*backend.ServerConfig, error) {
 	var chain *chaincfg.Params
 	switch c.activeNet {
@@ -106,12 +146,15 @@ func (c *config) serverConfig() (*backend.ServerConfig, error) {
 
 	return &backend.ServerConfig{
 		ChainParams: chain,
+		DcrdCfg:     c.dcrdConnConfig(),
 	}, nil
 }
 
 func loadConfig() (*config, []string, error) {
 	// Default config.
-	cfg := config{}
+	cfg := config{
+		DcrdCertPath: defaultDcrdCertPath,
+	}
 
 	// Pre-parse the command line options to see if an alternative config
 	// file was specified.  Any errors aside from the
@@ -228,6 +271,35 @@ func loadConfig() (*config, []string, error) {
 		cfg.Listeners = []string{
 			net.JoinHostPort("", cfg.activeNet.defaultListenPort()),
 		}
+	}
+
+	// Determine the default dcrd connect address based on the selected
+	// network.
+	if cfg.DcrdConnect == "" {
+		cfg.DcrdConnect = cfg.activeNet.defaultDcrdRPCConnect()
+	}
+
+	// Load the appropriate dcrd rpc.cert file.
+	if len(cfg.DcrdCertBytes) == 0 && cfg.DcrdCertPath != "" {
+		f, err := ioutil.ReadFile(cfg.DcrdCertPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("unable to load dcrd cert "+
+				"file: %v", err)
+		}
+		cfg.DcrdCertBytes = string(f)
+	}
+
+	// Attempt an early connection to the dcrd server and verify if it's a
+	// reasonable backend for dcrros operations. We ignore the error here
+	// because it's only possible due to unspecified network (which
+	// shouldn't happen in this function).
+	svrCfg, _ := cfg.serverConfig()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err = backend.CheckDcrd(ctx, svrCfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error while checking underlying "+
+			"dcrd: %v", err)
 	}
 
 	// Warn about missing config file only after all other configuration is

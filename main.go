@@ -30,7 +30,6 @@ func _main() error {
 
 	svrCfg, err := cfg.serverConfig()
 	if err != nil {
-		fmt.Println(err)
 		return err
 	}
 
@@ -40,7 +39,6 @@ func _main() error {
 
 	drsvr, err := backend.NewServer(ctx, svrCfg)
 	if err != nil {
-		log.Errorf("Error creating server instance: %v", err)
 		return err
 	}
 	go func() {
@@ -99,6 +97,7 @@ func _main() error {
 
 func main() {
 	if err := _main(); err != nil && err != errCmdDone {
+		fmt.Println(err)
 		os.Exit(1)
 	}
 }
