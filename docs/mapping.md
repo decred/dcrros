@@ -17,7 +17,7 @@ RTA Account => DCR Address
 
 - [ ] /account/balance
 - [x] /block
-- [ ] /block/transaction
+- [x] /block/transaction
 - [ ] /construction/metadata
 - [ ] /construction/submit
 - [ ] /mempool

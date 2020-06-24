@@ -264,14 +264,26 @@ func WireBlockToRosetta(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher, c
 		txs = append(txs, rtx)
 	}
 
+	blockHash := b.Header.BlockHash()
+	prevHeight := b.Header.Height - 1
+	prevHash := b.Header.PrevBlock
+	if b.Header.Height == 0 {
+		// https://www.rosetta-api.org/docs/common_mistakes.html#malformed-genesis-block
+		// currently (2020-05-24) recommends returning the same
+		// identifier on both BlockIdentifier and ParentBlockIdentifier
+		// on the genesis block.
+		prevHeight = 0
+		prevHash = blockHash
+	}
+
 	r := &rtypes.Block{
 		BlockIdentifier: &rtypes.BlockIdentifier{
 			Index: int64(b.Header.Height),
-			Hash:  b.Header.BlockHash().String(),
+			Hash:  blockHash.String(),
 		},
 		ParentBlockIdentifier: &rtypes.BlockIdentifier{
-			Index: int64(b.Header.Height - 1),
-			Hash:  b.Header.PrevBlock.String(),
+			Index: int64(prevHeight),
+			Hash:  prevHash.String(),
 		},
 		Timestamp:    b.Header.Timestamp.Unix() * 1000,
 		Transactions: txs,

@@ -17,6 +17,7 @@ const (
 	ErrInvalidArgument
 	ErrBlockNotFound
 	ErrTxNotFound
+	ErrUnimplemented
 )
 
 var errorCodeMsgs = map[ErrorCode]string{
@@ -25,6 +26,7 @@ var errorCodeMsgs = map[ErrorCode]string{
 	ErrInvalidArgument:  "invalid argument",
 	ErrBlockNotFound:    "block not found",
 	ErrTxNotFound:       "tx not found",
+	ErrUnimplemented:    "unimplemented",
 }
 
 func (err ErrorCode) AsError() Error {

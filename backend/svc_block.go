@@ -65,6 +65,10 @@ func (s *Server) makeInputsFetcher(ctx context.Context) types.PrevInputsFetcher 
 	}
 }
 
+// Block returns the block identified on the request as a rosetta encoded
+// block.
+//
+// NOTE: this is part of the BlockAPIServicer interface.
 func (s *Server) Block(ctx context.Context, req *rtypes.BlockRequest) (*rtypes.BlockResponse, *rtypes.Error) {
 	var bh *chainhash.Hash
 	var err error
@@ -123,8 +127,14 @@ func (s *Server) Block(ctx context.Context, req *rtypes.BlockRequest) (*rtypes.B
 	}, nil
 }
 
+// BlockTransaction returns additional transactions related to the specified
+// block, not returned by the Block() call.
+//
+// This is currently unused in Decred given that all relevant transactions are
+// returned by Block().
+//
+// NOTE: this is part of the BlockAPIServicer interface.
 func (s *Server) BlockTransaction(context.Context, *rtypes.BlockTransactionRequest,
 ) (*rtypes.BlockTransactionResponse, *rtypes.Error) {
-
-	return nil, nil
+	return nil, types.ErrUnimplemented.RError()
 }
