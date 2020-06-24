@@ -106,6 +106,7 @@ func (s *Server) Routers() []rserver.Router {
 		rserver.NewNetworkAPIController(s, s.asserter),
 		rserver.NewBlockAPIController(s, s.asserter),
 		rserver.NewMempoolAPIController(s, s.asserter),
+		rserver.NewConstructionAPIController(s, s.asserter),
 	}
 }
 

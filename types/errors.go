@@ -3,7 +3,6 @@ package types
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/dcrjson/v3"
@@ -12,21 +11,33 @@ import (
 type ErrorCode int32
 
 const (
-	ErrRequestCanceled ErrorCode = 1 + iota
+	ErrUnknown ErrorCode = iota
+	ErrRequestCanceled
 	ErrInvalidChainHash
 	ErrInvalidArgument
 	ErrBlockNotFound
 	ErrTxNotFound
 	ErrUnimplemented
+	ErrInvalidTransaction
+	ErrInvalidHexString
+	ErrAlreadyHaveTx
+	ErrTxAlreadyMined
+	ErrProcessingTx
 )
 
 var errorCodeMsgs = map[ErrorCode]string{
-	ErrRequestCanceled:  "request canceled",
-	ErrInvalidChainHash: "invalid chain hash",
-	ErrInvalidArgument:  "invalid argument",
-	ErrBlockNotFound:    "block not found",
-	ErrTxNotFound:       "tx not found",
-	ErrUnimplemented:    "unimplemented",
+	ErrUnknown:            "unknown error",
+	ErrRequestCanceled:    "request canceled",
+	ErrInvalidChainHash:   "invalid chain hash",
+	ErrInvalidArgument:    "invalid argument",
+	ErrBlockNotFound:      "block not found",
+	ErrTxNotFound:         "tx not found",
+	ErrUnimplemented:      "unimplemented",
+	ErrInvalidTransaction: "invalid transaction",
+	ErrInvalidHexString:   "invalid hex string",
+	ErrAlreadyHaveTx:      "already have transaction",
+	ErrTxAlreadyMined:     "tx already mined",
+	ErrProcessingTx:       "error processing tx",
 }
 
 func (err ErrorCode) Error() string {
@@ -115,7 +126,6 @@ type ErrorOption struct {
 func MapRpcErrCode(rpcErrCode dcrjson.RPCErrorCode, rosettaErrCode ErrorCode) ErrorOption {
 	return ErrorOption{
 		f: func(orig error, err *rtypes.Error) {
-			fmt.Println("mapping", orig, err)
 			if rpcerr, ok := orig.(*dcrjson.RPCError); ok && rpcerr.Code == rpcErrCode {
 				err.Code = int32(rosettaErrCode)
 			}
