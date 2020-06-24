@@ -12,6 +12,7 @@ RTA Account => DCR Address
 - Handle ticket outputs as different types of balance?
   - TicketSubmissionBalance (voting power) 
   - TicketCommitmentBalance (locked amount)
+- Dcrd errors are retriable by default? 
 
 # TODO Endpoints
 
@@ -20,8 +21,8 @@ RTA Account => DCR Address
 - [x] /block/transaction
 - [ ] /construction/metadata
 - [ ] /construction/submit
-- [ ] /mempool
-- [ ] /mempool/transaction
+- [x] /mempool
+- [x] /mempool/transaction
 - [x] /network/list
 - [x] /network/options
   - [ ] Fill in Allow struct

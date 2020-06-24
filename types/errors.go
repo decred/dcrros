@@ -29,6 +29,18 @@ var errorCodeMsgs = map[ErrorCode]string{
 	ErrUnimplemented:    "unimplemented",
 }
 
+func (err ErrorCode) Error() string {
+	return errorCodeMsgs[err]
+}
+
+func (err ErrorCode) Is(target error) bool {
+	if target, ok := target.(ErrorCode); ok {
+		return target == err
+	}
+
+	return false
+}
+
 func (err ErrorCode) AsError() Error {
 	return Error{
 		code: err,
@@ -52,6 +64,24 @@ type Error struct {
 	code      ErrorCode
 	msg       string
 	retriable bool
+}
+
+func (err Error) Error() string {
+	return err.msg
+}
+
+func (err Error) Is(target error) bool {
+	switch target := target.(type) {
+	case Error:
+		return target.code == err.code
+	case ErrorCode:
+		return target == err.code
+	}
+	return false
+}
+
+func (err Error) Unwrap() error {
+	return err.code
 }
 
 func (err Error) Retriable() Error {
@@ -115,4 +145,15 @@ func DcrdError(err error, opts ...ErrorOption) *rtypes.Error {
 	}
 
 	return e
+}
+
+func RError(err error) *rtypes.Error {
+	var e Error
+	if errors.As(err, &e) {
+		return e.RError()
+	}
+
+	return &rtypes.Error{
+		Message: err.Error(),
+	}
 }

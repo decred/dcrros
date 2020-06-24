@@ -120,7 +120,7 @@ func (s *Server) Block(ctx context.Context, req *rtypes.BlockRequest) (*rtypes.B
 	fetchInputs := s.makeInputsFetcher(ctx)
 	rblock, err := types.WireBlockToRosetta(b, prev, fetchInputs, s.chainParams)
 	if err != nil {
-		return nil, types.DcrdError(err)
+		return nil, types.RError(err)
 	}
 	return &rtypes.BlockResponse{
 		Block: rblock,

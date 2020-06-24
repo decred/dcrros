@@ -299,3 +299,11 @@ func WireBlockToRosetta(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher, c
 	}
 	return r, nil
 }
+
+// MempoolTxToRosetta converts a wire tx that is known to be on the mempool to
+// a rosetta tx.
+func MempoolTxToRosetta(tx *wire.MsgTx, fetchInputs PrevInputsFetcher, chainParams *chaincfg.Params) (*rtypes.Transaction, error) {
+	// Coinbase txs are never seen on the mempool so it's safe to use a
+	// negative txidx.
+	return wireBlockTxToRosetta(-1, tx, false, fetchInputs, chainParams)
+}
