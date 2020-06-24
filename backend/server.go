@@ -104,6 +104,7 @@ func (s *Server) ntfnHandlers() *rpcclient.NotificationHandlers {
 func (s *Server) Routers() []rserver.Router {
 	return []rserver.Router{
 		rserver.NewNetworkAPIController(s, s.asserter),
+		rserver.NewBlockAPIController(s, s.asserter),
 	}
 }
 
