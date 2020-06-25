@@ -27,7 +27,7 @@ RTA Account => DCR Address
 - [x] /mempool/transaction
 - [x] /network/list
 - [x] /network/options
-  - [ ] Fill in Allow struct
+  - [x] Fill in Allow struct
 - [x] /network/status
 
 

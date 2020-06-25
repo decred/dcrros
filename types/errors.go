@@ -11,6 +11,8 @@ import (
 type ErrorCode int32
 
 const (
+	// NOTE: after adding a new type, also modify errCodeMsgs.
+
 	ErrUnknown ErrorCode = iota
 	ErrRequestCanceled
 	ErrInvalidChainHash
@@ -25,6 +27,9 @@ const (
 	ErrProcessingTx
 	ErrInvalidAccountIdAddr
 	ErrBlockIndexAfterTip
+
+	// This MUST be the last member.
+	nbErrorCodes
 )
 
 var errorCodeMsgs = map[ErrorCode]string{
@@ -121,6 +126,16 @@ func (err Error) RError() *rtypes.Error {
 		Message:   err.msg,
 		Retriable: err.retriable,
 	}
+}
+
+// AllErrors returns all known error codes in a format suitable for inclusion
+// in an Allow response.
+func AllErrors() []*rtypes.Error {
+	errs := make([]*rtypes.Error, 0, nbErrorCodes)
+	for i := ErrorCode(0); i < nbErrorCodes; i++ {
+		errs = append(errs, i.RError())
+	}
+	return errs
 }
 
 type ErrorOption struct {

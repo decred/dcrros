@@ -50,7 +50,11 @@ func (s *Server) NetworkOptions(context.Context, *rtypes.NetworkRequest) (
 			MiddlewareVersion: &dcrrosVersion,
 			Metadata:          versionMeta,
 		},
-		Allow: &rtypes.Allow{},
+		Allow: &rtypes.Allow{
+			OperationStatuses: types.AllOpStatus(),
+			OperationTypes:    types.AllOpTypes(),
+			Errors:            types.AllErrors(),
+		},
 	}, nil
 }
 

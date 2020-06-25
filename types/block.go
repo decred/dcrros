@@ -116,8 +116,8 @@ func wireBlockTxToRosetta(txidx int, tx *wire.MsgTx, reversed bool, fetchInputs 
 				OperationIdentifier: &rtypes.OperationIdentifier{
 					Index: int64(i),
 				},
-				Type:    OpTypeDebit.String(),
-				Status:  status.String(),
+				Type:    OpTypeDebit.RType(),
+				Status:  string(status),
 				Account: account,
 				Amount:  DcrAmountToRosetta(amt),
 				Metadata: map[string]interface{}{
@@ -169,8 +169,8 @@ func wireBlockTxToRosetta(txidx int, tx *wire.MsgTx, reversed bool, fetchInputs 
 				OperationIdentifier: &rtypes.OperationIdentifier{
 					Index: opIdx,
 				},
-				Type:    OpTypeCredit.String(),
-				Status:  status.String(),
+				Type:    OpTypeCredit.RType(),
+				Status:  string(status),
 				Account: account,
 				Amount:  DcrAmountToRosetta(amt),
 				Metadata: map[string]interface{}{
