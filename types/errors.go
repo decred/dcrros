@@ -23,21 +23,25 @@ const (
 	ErrAlreadyHaveTx
 	ErrTxAlreadyMined
 	ErrProcessingTx
+	ErrInvalidAccountIdAddr
+	ErrBlockIndexAfterTip
 )
 
 var errorCodeMsgs = map[ErrorCode]string{
-	ErrUnknown:            "unknown error",
-	ErrRequestCanceled:    "request canceled",
-	ErrInvalidChainHash:   "invalid chain hash",
-	ErrInvalidArgument:    "invalid argument",
-	ErrBlockNotFound:      "block not found",
-	ErrTxNotFound:         "tx not found",
-	ErrUnimplemented:      "unimplemented",
-	ErrInvalidTransaction: "invalid transaction",
-	ErrInvalidHexString:   "invalid hex string",
-	ErrAlreadyHaveTx:      "already have transaction",
-	ErrTxAlreadyMined:     "tx already mined",
-	ErrProcessingTx:       "error processing tx",
+	ErrUnknown:              "unknown error",
+	ErrRequestCanceled:      "request canceled",
+	ErrInvalidChainHash:     "invalid chain hash",
+	ErrInvalidArgument:      "invalid argument",
+	ErrBlockNotFound:        "block not found",
+	ErrTxNotFound:           "tx not found",
+	ErrUnimplemented:        "unimplemented",
+	ErrInvalidTransaction:   "invalid transaction",
+	ErrInvalidHexString:     "invalid hex string",
+	ErrAlreadyHaveTx:        "already have transaction",
+	ErrTxAlreadyMined:       "tx already mined",
+	ErrProcessingTx:         "error processing tx",
+	ErrInvalidAccountIdAddr: "invalid address in account identifier",
+	ErrBlockIndexAfterTip:   "block index after current mainchain tip",
 }
 
 func (err ErrorCode) Error() string {

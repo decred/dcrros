@@ -13,10 +13,12 @@ RTA Account => DCR Address
   - TicketSubmissionBalance (voting power) 
   - TicketCommitmentBalance (locked amount)
 - Dcrd errors are retriable by default? 
+- Do not use the float64's values in calcFinalBalance()?
+  - This would involve querying the prev outs ourselves instead of relying on searchrawtransactions endpoint
 
 # TODO Endpoints
 
-- [ ] /account/balance
+- [x] /account/balance
 - [x] /block
 - [x] /block/transaction
 - [x] /construction/metadata

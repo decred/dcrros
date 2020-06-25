@@ -63,12 +63,7 @@ func (s *Server) NetworkStatus(ctx context.Context, req *rtypes.NetworkRequest) 
 
 	// We need the timestamp of the block, so request the best block hash
 	// then the block.
-	hash, err := s.c.GetBestBlockHash(ctx)
-	if err != nil {
-		return nil, types.DcrdError(err)
-	}
-
-	block, err := s.c.GetBlock(ctx, hash)
+	hash, height, block, err := s.bestBlock(ctx)
 	if err != nil {
 		return nil, types.DcrdError(err)
 	}
@@ -78,7 +73,7 @@ func (s *Server) NetworkStatus(ctx context.Context, req *rtypes.NetworkRequest) 
 	return &rtypes.NetworkStatusResponse{
 		CurrentBlockIdentifier: &rtypes.BlockIdentifier{
 			Hash:  hash.String(),
-			Index: int64(block.Header.Height),
+			Index: height,
 		},
 		CurrentBlockTimestamp: timestamp,
 		GenesisBlockIdentifier: &rtypes.BlockIdentifier{

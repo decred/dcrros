@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/decred/dcrd/rpcclient/v6"
 	"github.com/decred/dcrros/backend"
 	"github.com/decred/dcrros/internal/version"
+	"github.com/decred/slog"
 	"github.com/jessevdk/go-flags"
 )
 
@@ -80,6 +82,7 @@ type config struct {
 
 	ConfigFile string   `short:"C" long:"configfile" description:"Path to configuration file"`
 	Listeners  []string `long:"listen" description:"Add an interface/port to listen for connections (default all interfaces port: 9128, testnet: 19128, simnet: 29128)"`
+	DebugLevel string   `short:"d" long:"debuglevel" description:"Logging level for all subsystems {trace, debug, info, warn, error, critical} -- You may also specify <subsystem>=<level>,<subsystem2>=<level>,... to set the log level for individual subsystems -- Use show to list available subsystems"`
 
 	// Network
 
@@ -150,10 +153,82 @@ func (c *config) serverConfig() (*backend.ServerConfig, error) {
 	}, nil
 }
 
+// validLogLevel returns whether or not logLevel is a valid debug log level.
+func validLogLevel(logLevel string) bool {
+	_, ok := slog.LevelFromString(logLevel)
+	return ok
+}
+
+// supportedSubsystems returns a sorted slice of the supported subsystems for
+// logging purposes.
+func supportedSubsystems() []string {
+	// Convert the subsystemLoggers map keys to a slice.
+	subsystems := make([]string, 0, len(subsystemLoggers))
+	for subsysID := range subsystemLoggers {
+		subsystems = append(subsystems, subsysID)
+	}
+
+	// Sort the subsystems for stable display.
+	sort.Strings(subsystems)
+	return subsystems
+}
+
+// parseAndSetDebugLevels attempts to parse the specified debug level and set
+// the levels accordingly.  An appropriate error is returned if anything is
+// invalid.
+func parseAndSetDebugLevels(debugLevel string) error {
+	// When the specified string doesn't have any delimiters, treat it as
+	// the log level for all subsystems.
+	if !strings.Contains(debugLevel, ",") && !strings.Contains(debugLevel, "=") {
+		// Validate debug log level.
+		if !validLogLevel(debugLevel) {
+			str := "the specified debug level [%v] is invalid"
+			return fmt.Errorf(str, debugLevel)
+		}
+
+		// Change the logging level for all subsystems.
+		setLogLevels(debugLevel)
+
+		return nil
+	}
+
+	// Split the specified string into subsystem/level pairs while detecting
+	// issues and update the log levels accordingly.
+	for _, logLevelPair := range strings.Split(debugLevel, ",") {
+		if !strings.Contains(logLevelPair, "=") {
+			str := "the specified debug level contains an invalid " +
+				"subsystem/level pair [%v]"
+			return fmt.Errorf(str, logLevelPair)
+		}
+
+		// Extract the specified subsystem and log level.
+		fields := strings.Split(logLevelPair, "=")
+		subsysID, logLevel := fields[0], fields[1]
+
+		// Validate subsystem.
+		if _, exists := subsystemLoggers[subsysID]; !exists {
+			str := "the specified subsystem [%v] is invalid -- " +
+				"supported subsystems %v"
+			return fmt.Errorf(str, subsysID, supportedSubsystems())
+		}
+
+		// Validate log level.
+		if !validLogLevel(logLevel) {
+			str := "the specified debug level [%v] is invalid"
+			return fmt.Errorf(str, logLevel)
+		}
+
+		setLogLevel(subsysID, logLevel)
+	}
+
+	return nil
+}
+
 func loadConfig() (*config, []string, error) {
 	// Default config.
 	cfg := config{
 		DcrdCertPath: defaultDcrdCertPath,
+		DebugLevel:   defaultLogLevel,
 	}
 
 	// Pre-parse the command line options to see if an alternative config
@@ -178,6 +253,12 @@ func loadConfig() (*config, []string, error) {
 		fmt.Printf("%s version %s (Go version %s %s/%s)\n",
 			appName, version.String(),
 			runtime.Version(), runtime.GOOS, runtime.GOARCH)
+		return nil, nil, errCmdDone
+	}
+
+	// Special show command to list supported subsystems and exit.
+	if preCfg.DebugLevel == "show" {
+		fmt.Println("Supported subsystems", supportedSubsystems())
 		return nil, nil, errCmdDone
 	}
 
@@ -263,6 +344,14 @@ func loadConfig() (*config, []string, error) {
 	logPath := filepath.Join(logDir, "dcrros.log")
 	initLogRotator(logPath)
 	setLogLevels(defaultLogLevel)
+
+	// Parse, validate, and set debug log level(s).
+	if err := parseAndSetDebugLevels(cfg.DebugLevel); err != nil {
+		err := fmt.Errorf("%s: %v", funcName, err.Error())
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
+	}
 
 	// Add the default listener if none were specified. The default
 	// listener is all addresses on the listen port for the network we are

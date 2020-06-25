@@ -30,7 +30,7 @@ var (
 	}
 )
 
-func dcrAmountToRosetta(amt dcrutil.Amount) *rtypes.Amount {
+func DcrAmountToRosetta(amt dcrutil.Amount) *rtypes.Amount {
 	return &rtypes.Amount{
 		Value:    strconv.FormatInt(int64(amt), 10),
 		Currency: CurrencySymbol,
@@ -119,7 +119,7 @@ func wireBlockTxToRosetta(txidx int, tx *wire.MsgTx, reversed bool, fetchInputs 
 				Type:    OpTypeDebit.String(),
 				Status:  status.String(),
 				Account: account,
-				Amount:  dcrAmountToRosetta(amt),
+				Amount:  DcrAmountToRosetta(amt),
 				Metadata: map[string]interface{}{
 					"prev_hash":        in.PreviousOutPoint.Hash.String(),
 					"prev_index":       in.PreviousOutPoint.Index,
@@ -172,7 +172,7 @@ func wireBlockTxToRosetta(txidx int, tx *wire.MsgTx, reversed bool, fetchInputs 
 				Type:    OpTypeCredit.String(),
 				Status:  status.String(),
 				Account: account,
-				Amount:  dcrAmountToRosetta(amt),
+				Amount:  DcrAmountToRosetta(amt),
 				Metadata: map[string]interface{}{
 					"script_version": out.Version,
 				},
@@ -217,13 +217,20 @@ func wireBlockTxToRosetta(txidx int, tx *wire.MsgTx, reversed bool, fetchInputs 
 	return r, nil
 }
 
+// VoteBitsApprovesParent returns true if the provided voteBits as included in
+// some block header flags the parent block as approved according to current
+// consensus rules.
+func VoteBitsApprovesParent(voteBits uint16) bool {
+	return voteBits&0x01 == 0x01
+}
+
 // WireBlockToRosetta converts the given block in wire representation to the
 // block in rosetta representation. The previous block is needed when the
 // current block disapproved the regular transactions of the previous one, in
 // which case it must be specified or this function errors.
 func WireBlockToRosetta(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher, chainParams *chaincfg.Params) (*rtypes.Block, error) {
 
-	approvesParent := b.Header.VoteBits&0x01 == 0x01 || b.Header.Height == 0
+	approvesParent := VoteBitsApprovesParent(b.Header.VoteBits) || b.Header.Height == 0
 	if !approvesParent && prev == nil {
 		return nil, ErrNeedsPreviousBlock
 	}

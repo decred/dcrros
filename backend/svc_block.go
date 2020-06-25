@@ -70,38 +70,9 @@ func (s *Server) makeInputsFetcher(ctx context.Context) types.PrevInputsFetcher 
 //
 // NOTE: this is part of the BlockAPIServicer interface.
 func (s *Server) Block(ctx context.Context, req *rtypes.BlockRequest) (*rtypes.BlockResponse, *rtypes.Error) {
-	var bh *chainhash.Hash
-	var err error
-
-	bli := req.BlockIdentifier
-	switch {
-	case bli == nil || (bli.Hash == nil && bli.Index == nil):
-		// Neither hash nor index were specified, so fetch current
-		// block.
-		if bh, err = s.c.GetBestBlockHash(ctx); err != nil {
-			return nil, types.DcrdError(err)
-		}
-
-	case bli.Hash != nil:
-		bh = new(chainhash.Hash)
-		if err := chainhash.Decode(bh, *bli.Hash); err != nil {
-			return nil, types.ErrInvalidChainHash.RError()
-		}
-
-	case bli.Index != nil:
-		if bh, err = s.c.GetBlockHash(ctx, *bli.Index); err != nil {
-			return nil, types.DcrdError(err, types.MapRpcErrCode(-5, types.ErrBlockNotFound))
-		}
-
-	default:
-		// This should never happen unless the spec changed to allow
-		// some other form of block querying.
-		return nil, types.ErrInvalidArgument.RError()
-	}
-
-	b, err := s.c.GetBlock(ctx, bh)
+	_, _, b, err := s.getBlockByPartialId(ctx, req.BlockIdentifier)
 	if err != nil {
-		return nil, types.DcrdError(err, types.MapRpcErrCode(-5, types.ErrBlockNotFound))
+		return nil, types.DcrdError(err)
 	}
 	var prev *wire.MsgBlock
 
