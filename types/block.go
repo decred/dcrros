@@ -13,14 +13,6 @@ import (
 	"github.com/decred/dcrd/wire"
 )
 
-const (
-	// outputIndexFlag is the starting index of outputs when specified in
-	// an OperationIdentifier structure. This allows inputs and outputs to
-	// carry their original dcr transaction index while still maintaining
-	// the uniquiness invariant required by rosetta for that field.
-	OutputIndexFlag = int64(1 << 32)
-)
-
 var (
 	ErrNeedsPreviousBlock = errors.New("previous block required")
 
@@ -81,6 +73,9 @@ func wireBlockTxToRosetta(txidx int, tx *wire.MsgTx, reversed bool, fetchInputs 
 		return nil, err
 	}
 
+	// Maintain the running op index across input/output boundary.
+	var opIdx int64
+
 	ops := make([]*rtypes.Operation, 0, len(tx.TxIn)+len(tx.TxOut))
 	addTxIns := func() error {
 		for i, in := range tx.TxIn {
@@ -114,13 +109,14 @@ func wireBlockTxToRosetta(txidx int, tx *wire.MsgTx, reversed bool, fetchInputs 
 
 			op := &rtypes.Operation{
 				OperationIdentifier: &rtypes.OperationIdentifier{
-					Index: int64(i),
+					Index: int64(opIdx),
 				},
 				Type:    OpTypeDebit.RType(),
 				Status:  string(status),
 				Account: account,
 				Amount:  DcrAmountToRosetta(amt),
 				Metadata: map[string]interface{}{
+					"input_index":      i,
 					"prev_hash":        in.PreviousOutPoint.Hash.String(),
 					"prev_index":       in.PreviousOutPoint.Index,
 					"prev_tree":        in.PreviousOutPoint.Tree,
@@ -133,6 +129,7 @@ func wireBlockTxToRosetta(txidx int, tx *wire.MsgTx, reversed bool, fetchInputs 
 			}
 
 			ops = append(ops, op)
+			opIdx++
 		}
 
 		return nil
@@ -164,7 +161,6 @@ func wireBlockTxToRosetta(txidx int, tx *wire.MsgTx, reversed bool, fetchInputs 
 				status = OpStatusReversed
 			}
 
-			opIdx := int64(i) | OutputIndexFlag
 			op := &rtypes.Operation{
 				OperationIdentifier: &rtypes.OperationIdentifier{
 					Index: opIdx,
@@ -174,11 +170,13 @@ func wireBlockTxToRosetta(txidx int, tx *wire.MsgTx, reversed bool, fetchInputs 
 				Account: account,
 				Amount:  DcrAmountToRosetta(amt),
 				Metadata: map[string]interface{}{
+					"output_index":   i,
 					"script_version": out.Version,
 				},
 			}
 
 			ops = append(ops, op)
+			opIdx++
 		}
 
 		return nil
