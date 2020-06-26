@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	rserver "github.com/coinbase/rosetta-sdk-go/server"
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
@@ -24,6 +25,7 @@ func (s *Server) inputsFetcher(ctx context.Context, inputList ...*wire.OutPoint)
 
 	// Now, request the txs concurrently from dcrd (assumes txindex is on).
 	g, gctx := errgroup.WithContext(ctx)
+	var mu sync.Mutex
 	for txh := range txs {
 		txh := txh
 		g.Go(func() error {
@@ -31,7 +33,9 @@ func (s *Server) inputsFetcher(ctx context.Context, inputList ...*wire.OutPoint)
 			if err != nil {
 				return err
 			}
+			mu.Lock()
 			txs[txh] = tx.MsgTx()
+			mu.Unlock()
 			return nil
 		})
 	}
