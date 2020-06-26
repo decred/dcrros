@@ -38,10 +38,6 @@ var _ rserver.AccountAPIServicer = (*Server)(nil)
 func (s *Server) calcFinalBalance(ctx context.Context, addr dcrutil.Address, startBalance dcrutil.Amount, stopHeight int64, txs []*chainjson.SearchRawTransactionsResult) (dcrutil.Amount, error) {
 	balance := startBalance
 
-	// The amounts returned by searchrawtransactions are (unfortunately)
-	// floats and scaled in dcr units.
-	coinScale := float64(1e8)
-
 	saddr := addr.Address()
 
 	// Helper.
@@ -57,42 +53,12 @@ func (s *Server) calcFinalBalance(ctx context.Context, addr dcrutil.Address, sta
 	// The slowest part of processing a batch of txs is fetching previous
 	// blocks from the dcrd server, so we'll dedupe the list of blocks to
 	// fetch and grab them concurrently to improve throughput.
-	//
-	// First, decode the tx type and store it and the hash of the block
-	// that will be needed.
-	txTypeByHash := make(map[string]stake.TxType, len(txs))
 	blockApprovalByHeight := make(map[int64]bool)
-	for _, txInfo := range txs {
-		if _, ok := txTypeByHash[txInfo.Txid]; ok {
-			// Already processing this tx.
-			continue
-		}
-
-		// Decode the tx to determine its type. We could probably skip
-		// this if SearchRawTransactionsResult ever returned the tx
-		// type itself.
-		txBytes, err := hex.DecodeString(txInfo.Hex)
-		if err != nil {
-			return 0, types.ErrInvalidHexString
-		}
-		tx := new(wire.MsgTx)
-		if err := tx.FromBytes(txBytes); err != nil {
-			return 0, types.ErrInvalidTransaction
-		}
-		txType := stake.DetermineTxType(tx)
-		txTypeByHash[txInfo.Txid] = txType
-		if txType == stake.TxTypeRegular {
-			// We'll only need to fetch the block if the address is
-			// involved in a regular txs (stake txs don't get
-			// reversed).
-			blockApprovalByHeight[txInfo.BlockHeight+1] = false
-		}
-
-	}
-
-	// Grab the blocks.
 	g, gctx := errgroup.WithContext(ctx)
 	var mu sync.Mutex
+	for _, txInfo := range txs {
+		blockApprovalByHeight[txInfo.BlockHeight+1] = false
+	}
 	for height := range blockApprovalByHeight {
 		height := height
 		g.Go(func() error {
@@ -100,12 +66,13 @@ func (s *Server) calcFinalBalance(ctx context.Context, addr dcrutil.Address, sta
 			// just means we're attempting to calculate the balance
 			// up to the current tip.
 			_, bl, err := s.getBlockByHeight(gctx, height)
+			mu.Lock()
+			defer mu.Unlock()
+
 			switch {
 			case err == nil || errors.Is(err, types.ErrBlockIndexAfterTip):
 				// Consider approved by default at tip.
-				mu.Lock()
 				blockApprovalByHeight[height] = true
-				mu.Unlock()
 				return nil
 			default:
 				return err
@@ -122,7 +89,28 @@ func (s *Server) calcFinalBalance(ctx context.Context, addr dcrutil.Address, sta
 	svrLog.Tracef("%s balance modified by %d txs", saddr, len(txs))
 
 	for _, txInfo := range txs {
-		txType := txTypeByHash[txInfo.Txid]
+		// Decode the tx to determine its type. We could probably skip
+		// this if SearchRawTransactionsResult ever returned the tx
+		// type itself and input/output amounts in ints instead of
+		// floats.
+		txBytes, err := hex.DecodeString(txInfo.Hex)
+		if err != nil {
+			return 0, types.ErrInvalidHexString
+		}
+		tx := new(wire.MsgTx)
+		if err := tx.FromBytes(txBytes); err != nil {
+			return 0, types.ErrInvalidTransaction
+		}
+		txType := stake.DetermineTxType(tx)
+
+		// We'll use the corresponding inputs and outputs from the
+		// decoded tx, so ensure they're sane.
+		if len(tx.TxIn) != len(txInfo.Vin) {
+			return 0, fmt.Errorf("incongruent number of TxIn and Vin")
+		}
+		if len(tx.TxOut) != len(txInfo.Vout) {
+			return 0, fmt.Errorf("incongruent number of TxOut and Vout")
+		}
 
 		// Figure out whether this tx was disapproved because the block
 		// after where this tx was mined disapproved its parent. We
@@ -170,10 +158,12 @@ func (s *Server) calcFinalBalance(ctx context.Context, addr dcrutil.Address, sta
 			// Definitely spends the given address, so subtract the
 			// amount spent.
 			//
-			// It sucks that this is a float.
-			balance -= dcrutil.Amount(in.PrevOut.Value * coinScale)
-			svrLog.Tracef("%s debit input %d %.9f (curr=%s)", saddr,
-				i, in.PrevOut.Value, balance)
+			// Since we're dealing with mined txs, it's safe to use
+			// AmountIn.
+			delta := dcrutil.Amount(tx.TxIn[i].ValueIn)
+			balance -= delta
+			svrLog.Tracef("%s debit input %d %d (curr=%s)", saddr,
+				i, delta, balance)
 		}
 
 		// Now, increase the balance if there are outputs paying to
@@ -183,9 +173,10 @@ func (s *Server) calcFinalBalance(ctx context.Context, addr dcrutil.Address, sta
 				continue
 			}
 
-			balance += dcrutil.Amount(out.Value * coinScale)
-			svrLog.Tracef("%s credit output %d %.9f (curr=%s)", saddr,
-				i, out.Value, balance)
+			delta := dcrutil.Amount(tx.TxOut[i].Value)
+			balance += delta
+			svrLog.Tracef("%s credit output %d %d (curr=%s)", saddr,
+				i, delta, balance)
 		}
 
 	}
@@ -209,7 +200,7 @@ func (s *Server) AccountBalance(ctx context.Context, req *rtypes.AccountBalanceR
 	// Figure out when to stop considering blocks (what the target height
 	// for balance was requested for by the client). By default it's the
 	// current block height.
-	_, stopHeight, _, err := s.getBlockByPartialId(ctx, req.BlockIdentifier)
+	stopHash, stopHeight, _, err := s.getBlockByPartialId(ctx, req.BlockIdentifier)
 	if err != nil {
 		return nil, types.DcrdError(err)
 	}
@@ -217,19 +208,15 @@ func (s *Server) AccountBalance(ctx context.Context, req *rtypes.AccountBalanceR
 	// Track the balance across batches of txs.
 	var balance dcrutil.Amount
 
-	// Process ll txs affecting the given addr. Assumes addrindex is on.
+	// Process all txs affecting the given addr. Assumes addrindex is on.
 	var skip int
 	count := 100
 	for {
-		// Fetch a batch of transactions. If none are returned, we're
-		// done.
+		// Fetch a batch of transactions.
 		txs, err := s.c.SearchRawTransactionsVerbose(ctx, addr, skip,
 			count, true, false, nil)
 		if err != nil && !strings.Contains(err.Error(), "No Txns available") {
 			return nil, types.DcrdError(err)
-		}
-		if len(txs) == 0 {
-			break
 		}
 
 		// If we're performing a historical balance check, stop
@@ -240,6 +227,11 @@ func (s *Server) AccountBalance(ctx context.Context, req *rtypes.AccountBalanceR
 				txs = txs[:i]
 				break
 			}
+		}
+
+		// If there are no transactions, we're done.
+		if len(txs) == 0 {
+			break
 		}
 
 		// Account for these transactions.
@@ -260,6 +252,10 @@ func (s *Server) AccountBalance(ctx context.Context, req *rtypes.AccountBalanceR
 	return &rtypes.AccountBalanceResponse{
 		Balances: []*rtypes.Amount{
 			types.DcrAmountToRosetta(balance),
+		},
+		BlockIdentifier: &rtypes.BlockIdentifier{
+			Hash:  stopHash.String(),
+			Index: stopHeight,
 		},
 	}, nil
 
