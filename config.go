@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -83,6 +84,7 @@ type config struct {
 	ConfigFile string   `short:"C" long:"configfile" description:"Path to configuration file"`
 	Listeners  []string `long:"listen" description:"Add an interface/port to listen for connections (default all interfaces port: 9128, testnet: 19128, simnet: 29128)"`
 	DebugLevel string   `short:"d" long:"debuglevel" description:"Logging level for all subsystems {trace, debug, info, warn, error, critical} -- You may also specify <subsystem>=<level>,<subsystem2>=<level>,... to set the log level for individual subsystems -- Use show to list available subsystems"`
+	Profile    string   `long:"profile" description:"Enable HTTP profiling on given [addr:]port -- NOTE port must be between 1024 and 65536"`
 
 	// Network
 
@@ -359,6 +361,27 @@ func loadConfig() (*config, []string, error) {
 	if len(cfg.Listeners) == 0 {
 		cfg.Listeners = []string{
 			net.JoinHostPort("", cfg.activeNet.defaultListenPort()),
+		}
+	}
+
+	// Validate format of profile, can be an address:port, or just a port.
+	if cfg.Profile != "" {
+		// If profile is just a number, then add a default host of
+		// "127.0.0.1" such that Profile is a valid tcp address.
+		if _, err := strconv.Atoi(cfg.Profile); err == nil {
+			cfg.Profile = net.JoinHostPort("127.0.0.1", cfg.Profile)
+		}
+
+		// Check the Profile is a valid address.
+		_, portStr, err := net.SplitHostPort(cfg.Profile)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid profile host/port: %v", err)
+		}
+
+		// Finally, check the port is in range.
+		if port, _ := strconv.Atoi(portStr); port < 1024 || port > 65535 {
+			return nil, nil, fmt.Errorf("profile address %s: port "+
+				"must be between 1024 and 65535", cfg.Profile)
 		}
 	}
 
