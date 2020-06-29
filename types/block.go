@@ -29,17 +29,37 @@ func DcrAmountToRosetta(amt dcrutil.Amount) *rtypes.Amount {
 	}
 }
 
-func dcrPkScriptToAccount(version uint16, pkScript []byte, chainParams *chaincfg.Params) (*rtypes.AccountIdentifier, error) {
+// VoteBitsApprovesParent returns true if the provided voteBits as included in
+// some block header flags the parent block as approved according to current
+// consensus rules.
+func VoteBitsApprovesParent(voteBits uint16) bool {
+	return voteBits&0x01 == 0x01
+}
+
+func dcrPkScriptToAccountAddr(version uint16, pkScript []byte, chainParams *chaincfg.Params) (string, error) {
+	if version != 0 {
+		return "", nil
+	}
+
 	_, addrs, _, err := txscript.ExtractPkScriptAddrs(version, pkScript, chainParams)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	if len(addrs) != 1 {
 		// TODO: support 'bare' (non-p2sh) multisig?
-		return nil, nil
+		return "", nil
 	}
 
+	saddr := addrs[0].Address()
+	return saddr, nil
+}
+
+func dcrPkScriptToAccount(version uint16, pkScript []byte, chainParams *chaincfg.Params) (*rtypes.AccountIdentifier, error) {
+	saddr, err := dcrPkScriptToAccountAddr(version, pkScript, chainParams)
+	if err != nil {
+		return nil, err
+	}
 	return &rtypes.AccountIdentifier{
 		Address: addrs[0].Address(),
 	}, nil
@@ -53,16 +73,71 @@ type PrevInput struct {
 
 type PrevInputsFetcher func(...*wire.OutPoint) (map[wire.OutPoint]*PrevInput, error)
 
-func wireBlockTxToRosetta(txidx int, tx *wire.MsgTx, reversed bool, fetchInputs PrevInputsFetcher, chainParams *chaincfg.Params) (*rtypes.Transaction, error) {
-	txType := stake.DetermineTxType(tx)
-	isVote := txType == stake.TxTypeSSGen
-	isCoinbase := txType == stake.TxTypeRegular && txidx == 0
+type Op struct {
+	Tree      int8
+	Status    OpStatus
+	Tx        *wire.MsgTx
+	TxIndex   int
+	IOIndex   int
+	Account   string
+	Type      OpType
+	OpIndex   int64
+	Amount    dcrutil.Amount
+	In        *wire.TxIn
+	Out       *wire.TxOut
+	PrevInput *PrevInput
+}
+
+func (op *Op) ROp() *rtypes.Operation {
+	account := &rtypes.AccountIdentifier{
+		Address: op.Account,
+	}
+	var meta map[string]interface{}
+	if op.Type == OpTypeDebit {
+		meta = map[string]interface{}{
+			"input_index":      op.IOIndex,
+			"prev_hash":        op.In.PreviousOutPoint.Hash.String(),
+			"prev_index":       op.In.PreviousOutPoint.Index,
+			"prev_tree":        op.In.PreviousOutPoint.Tree,
+			"sequence":         op.In.Sequence,
+			"block_height":     op.In.BlockHeight,
+			"block_index":      op.In.BlockIndex,
+			"signature_script": op.In.SignatureScript,
+			"script_version":   op.PrevInput.Version,
+		}
+	} else {
+		meta = map[string]interface{}{
+			"output_index":   op.IOIndex,
+			"script_version": op.Out.Version,
+		}
+	}
+
+	return &rtypes.Operation{
+		OperationIdentifier: &rtypes.OperationIdentifier{
+			Index: int64(op.OpIndex),
+		},
+		Type:     op.Type.RType(),
+		Status:   string(op.Status),
+		Account:  account,
+		Amount:   DcrAmountToRosetta(op.Amount),
+		Metadata: meta,
+	}
+
+}
+
+type BlockOpCb = func(op *Op) error
+
+func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpCb, chainParams *chaincfg.Params) error {
+	tx := op.Tx
+	isVote := op.Tree == wire.TxTreeStake && stake.IsSSGen(tx)
+	isCoinbase := op.Tree == wire.TxTreeRegular && op.TxIndex == 0
 
 	// Fetch the relevant data for the inputs.
 	prevOutpoints := make([]*wire.OutPoint, 0, len(tx.TxIn))
 	for i, in := range tx.TxIn {
 		if i == 0 && (isVote || isCoinbase) {
-			// Coinbases don't have an input with i > 0.
+			// Coinbases don't have an input with i > 0 so this is
+			// safe.
 			continue
 		}
 
@@ -70,13 +145,15 @@ func wireBlockTxToRosetta(txidx int, tx *wire.MsgTx, reversed bool, fetchInputs 
 	}
 	prevInputs, err := fetchInputs(prevOutpoints...)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	// Maintain the running op index across input/output boundary.
-	var opIdx int64
+	var ok bool
 
-	ops := make([]*rtypes.Operation, 0, len(tx.TxIn)+len(tx.TxOut))
+	// Reset op's output attributes.
+	op.Out = nil
+
+	// Helper to process the inputs.
 	addTxIns := func() error {
 		for i, in := range tx.TxIn {
 			if i == 0 && (isVote || isCoinbase) {
@@ -84,57 +161,47 @@ func wireBlockTxToRosetta(txidx int, tx *wire.MsgTx, reversed bool, fetchInputs 
 				continue
 			}
 
-			prevInput, ok := prevInputs[in.PreviousOutPoint]
+			op.PrevInput, ok = prevInputs[in.PreviousOutPoint]
 			if !ok {
 				return fmt.Errorf("missing prev outpoint %s", in.PreviousOutPoint)
 			}
 
-			account, err := dcrPkScriptToAccount(prevInput.Version,
-				prevInput.PkScript, chainParams)
+			op.Account, err = dcrPkScriptToAccountAddr(op.PrevInput.Version,
+				op.PrevInput.PkScript, chainParams)
 			if err != nil {
 				return err
 			}
-			if account == nil {
+			if op.Account == "" {
 				// Might happen for OP_RETURNs, ticket
 				// commitments, etc.
 				continue
 			}
 
-			amt := -prevInput.Amount
-			status := OpStatusSuccess
-			if reversed {
-				amt *= -1
-				status = OpStatusReversed
+			// Fill in op input data.
+			op.IOIndex = i
+			op.In = in
+			op.Type = OpTypeDebit
+			op.Amount = -op.PrevInput.Amount
+			if op.Status == OpStatusReversed {
+				op.Amount *= -1
 			}
 
-			op := &rtypes.Operation{
-				OperationIdentifier: &rtypes.OperationIdentifier{
-					Index: int64(opIdx),
-				},
-				Type:    OpTypeDebit.RType(),
-				Status:  string(status),
-				Account: account,
-				Amount:  DcrAmountToRosetta(amt),
-				Metadata: map[string]interface{}{
-					"input_index":      i,
-					"prev_hash":        in.PreviousOutPoint.Hash.String(),
-					"prev_index":       in.PreviousOutPoint.Index,
-					"prev_tree":        in.PreviousOutPoint.Tree,
-					"sequence":         in.Sequence,
-					"block_height":     in.BlockHeight,
-					"block_index":      in.BlockIndex,
-					"signature_script": in.SignatureScript,
-					"script_version":   prevInput.Version,
-				},
+			if err := applyOp(op); err != nil {
+				return err
 			}
 
-			ops = append(ops, op)
-			opIdx++
+			// Track cumulative OpIndex.
+			op.OpIndex += 1
 		}
 
 		return nil
 	}
 
+	// Reset op's input attributes.
+	op.In = nil
+	op.PrevInput = nil
+
+	// Helper to process the outputs.
 	addTxOuts := func() error {
 		for i, out := range tx.TxOut {
 			if out.Value == 0 {
@@ -145,81 +212,115 @@ func wireBlockTxToRosetta(txidx int, tx *wire.MsgTx, reversed bool, fetchInputs 
 				continue
 			}
 
-			account, err := dcrPkScriptToAccount(out.Version,
+			op.Account, err = dcrPkScriptToAccountAddr(out.Version,
 				out.PkScript, chainParams)
 			if err != nil {
 				return err
 			}
-			if account == nil {
+			if op.Account == "" {
 				continue
 			}
 
-			amt := dcrutil.Amount(out.Value)
-			status := OpStatusSuccess
-			if reversed {
-				amt *= -1
-				status = OpStatusReversed
+			// Fill in op output data.
+			op.IOIndex = i
+			op.Out = out
+			op.Type = OpTypeCredit
+			op.Amount = dcrutil.Amount(out.Value)
+			if op.Status == OpStatusReversed {
+				op.Amount *= -1
 			}
 
-			op := &rtypes.Operation{
-				OperationIdentifier: &rtypes.OperationIdentifier{
-					Index: opIdx,
-				},
-				Type:    OpTypeCredit.RType(),
-				Status:  string(status),
-				Account: account,
-				Amount:  DcrAmountToRosetta(amt),
-				Metadata: map[string]interface{}{
-					"output_index":   i,
-					"script_version": out.Version,
-				},
+			if err := applyOp(op); err != nil {
+				return err
 			}
 
-			ops = append(ops, op)
-			opIdx++
+			// Track cumulative OpIndex.
+			op.OpIndex += 1
 		}
 
 		return nil
 	}
 
-	if !reversed {
+	if op.Status == OpStatusSuccess {
 		if err := addTxIns(); err != nil {
-			return nil, err
+			return err
 		}
 		if err := addTxOuts(); err != nil {
-			return nil, err
+			return err
 		}
 	} else {
 		// When reversing a tx we apply the update in the opposite
 		// order: first roll back outputs (which were crediting an
 		// amount) then inputs (which were debiting the amount + fee).
 		if err := addTxOuts(); err != nil {
-			return nil, err
+			return err
 		}
 		if err := addTxIns(); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
-	r := &rtypes.Transaction{
+	return nil
+}
+
+func IterateBlockOps(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher, applyOp BlockOpCb, chainParams *chaincfg.Params) error {
+	approvesParent := VoteBitsApprovesParent(b.Header.VoteBits) || b.Header.Height == 0
+	if !approvesParent && prev == nil {
+		return ErrNeedsPreviousBlock
+	}
+
+	// Use a single op var.
+	var op Op
+
+	// Helper to apply a set of transactions.
+	applyTxs := func(tree int8, status OpStatus, txs []*wire.MsgTx) error {
+		op = Op{
+			Tree:   tree,
+			Status: status,
+		}
+		for i, tx := range txs {
+			op.Tx = tx
+			op.TxIndex = i
+			op.OpIndex = 0
+			err := iterateBlockOpsInTx(&op, fetchInputs, applyOp,
+				chainParams)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+
+	if !approvesParent {
+		// Reverse regular transactions of the previous block.
+		if err := applyTxs(wire.TxTreeRegular, OpStatusReversed, prev.Transactions); err != nil {
+			return err
+		}
+	}
+	if err := applyTxs(wire.TxTreeRegular, OpStatusSuccess, b.Transactions); err != nil {
+		return err
+	}
+	if err := applyTxs(wire.TxTreeStake, OpStatusSuccess, b.STransactions); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func txMetaToRosetta(tx *wire.MsgTx) *rtypes.Transaction {
+	return &rtypes.Transaction{
 		TransactionIdentifier: &rtypes.TransactionIdentifier{
 			Hash: tx.TxHash().String(),
 		},
-		Operations: ops,
+		Operations: []*rtypes.Operation{},
 		Metadata: map[string]interface{}{
 			"version":  tx.Version,
 			"expiry":   tx.Expiry,
 			"locktime": tx.LockTime,
 		},
 	}
-	return r, nil
-}
 
-// VoteBitsApprovesParent returns true if the provided voteBits as included in
-// some block header flags the parent block as approved according to current
-// consensus rules.
-func VoteBitsApprovesParent(voteBits uint16) bool {
-	return voteBits&0x01 == 0x01
 }
 
 // WireBlockToRosetta converts the given block in wire representation to the
@@ -240,33 +341,23 @@ func WireBlockToRosetta(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher, c
 	}
 	txs = make([]*rtypes.Transaction, 0, nbTxs)
 
-	if !approvesParent {
-		// Reverse regular transactions of the previous block.
-		for i, tx := range prev.Transactions {
-			rtx, err := wireBlockTxToRosetta(i, tx, true, fetchInputs, chainParams)
-			if err != nil {
-				return nil, err
-			}
-
-			txs = append(txs, rtx)
+	// Closure that builds the list of transactions/ops by iterating over
+	// the block's transactions.
+	var tx *rtypes.Transaction
+	applyOp := func(op *Op) error {
+		if op.OpIndex == 0 {
+			// Starting a new transaction.
+			tx = txMetaToRosetta(op.Tx)
+			txs = append(txs, tx)
 		}
+		tx.Operations = append(tx.Operations, op.ROp())
+		return nil
 	}
 
-	for i, tx := range b.Transactions {
-		rtx, err := wireBlockTxToRosetta(i, tx, false, fetchInputs, chainParams)
-		if err != nil {
-			return nil, err
-		}
-
-		txs = append(txs, rtx)
-	}
-	for i, tx := range b.STransactions {
-		rtx, err := wireBlockTxToRosetta(i, tx, false, fetchInputs, chainParams)
-		if err != nil {
-			return nil, err
-		}
-
-		txs = append(txs, rtx)
+	// Build the list of transactions.
+	err := IterateBlockOps(b, prev, fetchInputs, applyOp, chainParams)
+	if err != nil {
+		return nil, err
 	}
 
 	blockHash := b.Header.BlockHash()
@@ -308,7 +399,31 @@ func WireBlockToRosetta(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher, c
 // MempoolTxToRosetta converts a wire tx that is known to be on the mempool to
 // a rosetta tx.
 func MempoolTxToRosetta(tx *wire.MsgTx, fetchInputs PrevInputsFetcher, chainParams *chaincfg.Params) (*rtypes.Transaction, error) {
-	// Coinbase txs are never seen on the mempool so it's safe to use a
-	// negative txidx.
-	return wireBlockTxToRosetta(-1, tx, false, fetchInputs, chainParams)
+	rtx := txMetaToRosetta(tx)
+	applyOp := func(op *Op) error {
+		rtx.Operations = append(rtx.Operations, op.ROp())
+		return nil
+	}
+
+	txType := stake.DetermineTxType(tx)
+	tree := wire.TxTreeRegular
+	if txType != stake.TxTypeRegular {
+		tree = wire.TxTreeStake
+	}
+
+	op := Op{
+		Tree:   tree,
+		Status: OpStatusSuccess,
+
+		// Coinbase txs are never seen on the mempool so it's safe to
+		// use a negative txidx.
+		TxIndex: -1,
+	}
+	err := iterateBlockOpsInTx(&op, fetchInputs, applyOp,
+		chainParams)
+	if err != nil {
+		return nil, err
+	}
+
+	return rtx, nil
 }
