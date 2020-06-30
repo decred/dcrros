@@ -8,6 +8,7 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"sync"
 	"time"
 
 	rserver "github.com/coinbase/rosetta-sdk-go/server"
@@ -37,6 +38,7 @@ func _main() error {
 	log.Infof("Initing dcr-rosetta server v%s on %s", version.String(), cfg.activeNet)
 
 	ctx := shutdownListener()
+	var wg sync.WaitGroup
 
 	// Enable http profiling server if requested.
 	if cfg.Profile != "" {
@@ -59,6 +61,7 @@ func _main() error {
 	if err != nil {
 		return err
 	}
+	wg.Add(1)
 	go func() {
 		// Errors other than context canceled are fatal.
 		err := drsvr.Run(ctx)
@@ -66,6 +69,7 @@ func _main() error {
 			log.Errorf("Fatal error running the server instance: %v", err)
 			requestShutdown()
 		}
+		wg.Done()
 	}()
 
 	index := rserver.Route{
@@ -90,9 +94,11 @@ func _main() error {
 	}
 
 	for _, l := range listeners {
+		wg.Add(1)
 		go func(l net.Listener) {
 			log.Infof("Listening on %s", l.Addr().String())
 			svr.Serve(l)
+			wg.Done()
 		}(l)
 	}
 
@@ -109,6 +115,9 @@ func _main() error {
 	if errors.Is(err, context.Canceled) {
 		log.Errorf("Terminating process before all connections were done")
 	}
+
+	// Wait for all goroutines to finish.
+	wg.Wait()
 
 	return nil
 }
