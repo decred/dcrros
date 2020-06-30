@@ -2,188 +2,210 @@ package backend
 
 import (
 	"context"
-	"encoding/hex"
-	"errors"
-	"fmt"
-	"strings"
-	"sync"
+	"time"
 
 	rserver "github.com/coinbase/rosetta-sdk-go/server"
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
-	"github.com/decred/dcrd/blockchain/stake/v3"
+	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrutil/v3"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/wire"
+	"github.com/decred/dcrros/backend/backenddb"
 	"github.com/decred/dcrros/types"
-	"golang.org/x/sync/errgroup"
 )
 
 var _ rserver.AccountAPIServicer = (*Server)(nil)
 
-// calcBalance calculates the final balance of a given address given all
-// transactions found by a searchRawTransactions rpc call. It assumes prevOut
-// is true (that is, the results include previous output information).
-//
-// Due to including transactions mined in blocks that were eventually
-// disapproved, we need to take care when processing to skip such txs and not
-// include their balance-changing operations in the final balance.
-//
-// However, the semantics for the underlying blockchain is that any
-// non-disapproved tx is automatically approved, thus if we're calculating a
-// historical balance and the tx is included in the target block we also
-// special-case any attempts to detect future disapproved blocks.
-//
-// The initial balance can be specified so that calls to searchrawtransactions
-// can be batched.
-func (s *Server) calcFinalBalance(ctx context.Context, addr dcrutil.Address, startBalance dcrutil.Amount, stopHeight int64, txs []*chainjson.SearchRawTransactionsResult) (dcrutil.Amount, error) {
-	balance := startBalance
+func updateUtxoSet(op *types.Op, utxoSet map[wire.OutPoint]*types.PrevInput) {
+	typ := op.Type
+	st := op.Status
+	switch {
+	case typ == types.OpTypeDebit && st == types.OpStatusSuccess:
+		// Successful input removes entry from utxo set.
+		delete(utxoSet, op.In.PreviousOutPoint)
 
-	saddr := addr.Address()
-
-	// Helper.
-	includes := func(haystack []string, needle string) bool {
-		for _, s := range haystack {
-			if s == needle {
-				return true
-			}
+	case typ == types.OpTypeCredit && st == types.OpStatusSuccess:
+		// Successful output adds entry to utxo set.
+		outp := wire.OutPoint{
+			Hash:  op.Tx.TxHash(),
+			Index: uint32(op.IOIndex),
+			Tree:  op.Tree,
 		}
-		return false
-	}
+		utxoSet[outp] = &types.PrevInput{
+			Amount:   op.Amount,
+			PkScript: op.Out.PkScript,
+			Version:  op.Out.Version,
+		}
 
-	// The slowest part of processing a batch of txs is fetching previous
-	// blocks from the dcrd server, so we'll dedupe the list of blocks to
-	// fetch and grab them concurrently to improve throughput.
-	blockApprovalByHeight := make(map[int64]bool)
-	g, gctx := errgroup.WithContext(ctx)
-	var mu sync.Mutex
-	for _, txInfo := range txs {
-		blockApprovalByHeight[txInfo.BlockHeight+1] = false
-	}
-	for height := range blockApprovalByHeight {
-		height := height
-		g.Go(func() error {
-			// We can ignore the ErrBlockIndexAfterTip since it
-			// just means we're attempting to calculate the balance
-			// up to the current tip.
-			_, bl, err := s.getBlockByHeight(gctx, height)
-			mu.Lock()
-			defer mu.Unlock()
+	case typ == types.OpTypeDebit && st == types.OpStatusReversed:
+		// Reversed input returns entry to the utxo set.
+		utxoSet[op.In.PreviousOutPoint] = op.PrevInput
 
-			switch {
-			case err == nil || errors.Is(err, types.ErrBlockIndexAfterTip):
-				// Consider approved by default at tip.
-				blockApprovalByHeight[height] = true
-				return nil
-			default:
-				return err
+	case typ == types.OpTypeCredit && st == types.OpStatusReversed:
+		// Reversed output removes entry from the utxo set.
+		outp := wire.OutPoint{
+			Hash:  op.Tx.TxHash(),
+			Index: uint32(op.IOIndex),
+			Tree:  op.Tree,
+		}
+		delete(utxoSet, outp)
+
+	}
+}
+
+func (s *Server) preProcessAccountBlock(ctx context.Context, bh *chainhash.Hash, b, prev *wire.MsgBlock, utxoSet map[wire.OutPoint]*types.PrevInput) error {
+	fetchInputs := s.makeInputsFetcher(ctx, utxoSet)
+
+	height := int64(b.Header.Height)
+	newBalances := make(map[string]dcrutil.Amount)
+
+	return s.db.Update(ctx, func(dbtx backenddb.WriteTx) error {
+		applyOp := func(op *types.Op) error {
+			account := op.Account
+			if _, ok := newBalances[account]; !ok {
+				// First time on this block we're modifying
+				// this account, so fetch the current balance
+				// from the db.
+				lastBal, err := s.db.Balance(dbtx, account, height-1)
+				if err != nil {
+					return err
+				}
+				newBalances[account] = lastBal
 			}
 
-			blockApprovalByHeight[height] = types.VoteBitsApprovesParent(bl.Header.VoteBits)
+			// All dcrros status are currently successful (i.e.
+			// affect the balance) so the following is safe without
+			// checking for the specific status.
+			newBalances[account] += op.Amount
+
+			// Modify the utxo set according to this op so
+			// fetchInputs can be implemented without requiring a
+			// network call back to dcrd.
+			updateUtxoSet(op, utxoSet)
+
+			return nil
+		}
+
+		err := types.IterateBlockOps(b, prev, fetchInputs, applyOp, s.chainParams)
+		if err != nil {
+			return err
+		}
+
+		// Update the db with the new balances.
+		return s.db.StoreBalances(dbtx, *bh, height, newBalances)
+	})
+}
+
+// preProcessAccounts pre-processes the blockchain to setup the account
+// balances index in the server's badger db.
+//
+// This is called during server startup.
+func (s *Server) preProcessAccounts(ctx context.Context) error {
+	start := time.Now()
+
+	var startHeight int64
+	var startHash chainhash.Hash
+
+	err := s.db.View(ctx, func(dbtx backenddb.ReadTx) error {
+		var err error
+		startHash, startHeight, err = s.db.LastProcessedBlock(dbtx)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+
+	// Verify if it matches the block at the mainchain at startHeight. If
+	// it doesn't, we'll have to roll back due to a reorg that happened
+	// while we were offline.
+	hash, err := s.getBlockHash(ctx, startHeight)
+	if err != nil {
+		return err
+	}
+	if *hash != startHash && startHeight > 0 {
+		svrLog.Warnf("Last processed block %s does not match current "+
+			"mainchain block %s at height %d. Rolling back.",
+			startHash, hash, startHeight)
+
+		err := s.db.Update(ctx, func(dbtx backenddb.WriteTx) error {
+			for startHeight > 0 {
+				svrLog.Debugf("Rolling back block %d %s",
+					startHeight, startHash)
+				if err := s.db.RollbackTip(dbtx, startHeight, startHash); err != nil {
+					return err
+				}
+
+				startHeight--
+				startHash, err = s.db.ProcessedBlockHash(dbtx, startHeight)
+				if err != nil {
+					return err
+				}
+
+				hash, err = s.getBlockHash(ctx, startHeight)
+				if err != nil {
+					return err
+				}
+
+				if *hash == startHash {
+					break
+				}
+			}
+
+			// Found the starting point.
+			svrLog.Infof("Rolled back tip to block %d %s",
+				startHeight, startHash)
+
 			return nil
 		})
-	}
-	if err := g.Wait(); err != nil {
-		return 0, err
-	}
-
-	svrLog.Tracef("%s balance modified by %d txs", saddr, len(txs))
-
-	for _, txInfo := range txs {
-		// Decode the tx to determine its type. We could probably skip
-		// this if SearchRawTransactionsResult ever returned the tx
-		// type itself and input/output amounts in ints instead of
-		// floats.
-		txBytes, err := hex.DecodeString(txInfo.Hex)
 		if err != nil {
-			return 0, types.ErrInvalidHexString
+			return err
 		}
-		tx := new(wire.MsgTx)
-		if err := tx.FromBytes(txBytes); err != nil {
-			return 0, types.ErrInvalidTransaction
-		}
-		txType := stake.DetermineTxType(tx)
-
-		// We'll use the corresponding inputs and outputs from the
-		// decoded tx, so ensure they're sane.
-		if len(tx.TxIn) != len(txInfo.Vin) {
-			return 0, fmt.Errorf("incongruent number of TxIn and Vin")
-		}
-		if len(tx.TxOut) != len(txInfo.Vout) {
-			return 0, fmt.Errorf("incongruent number of TxOut and Vout")
-		}
-
-		// Figure out whether this tx was disapproved because the block
-		// after where this tx was mined disapproved its parent. We
-		// only need to do this for regular txs since stake txs can't
-		// be disapproved. We also skip this test when the tx is mined
-		// in the last block we're interested in so that historical
-		// balance queries reflect the correct amount at that height
-		// independently of whether a future block would reverse the
-		// tx.
-		if txType == stake.TxTypeRegular && txInfo.BlockHeight < stopHeight {
-			disapproved := !blockApprovalByHeight[txInfo.BlockHeight+1]
-			if disapproved {
-				// Skip this tx since it's known to be in a
-				// disapproved block.
-				svrLog.Tracef("%s skipping disapproved tx %s at block %d",
-					saddr, txInfo.Txid, txInfo.BlockHeight)
-				continue
-			}
-		}
-
-		svrLog.Tracef("%s accounting for tx %s at block %d", saddr,
-			txInfo.Txid, txInfo.BlockHeight)
-
-		// Account for the effects of this tx in the balance.
-		//
-		// First, decrease the balance if there's an input spending
-		// from this tx.
-		for i, in := range txInfo.Vin {
-			if in.Coinbase != "" || in.Stakebase != "" {
-				// Skip coinbase/stakebase inputs since those
-				// don't spend from an account(=address).
-				continue
-			}
-			if in.PrevOut == nil {
-				svrLog.Errorf("Prevout not included in vin for "+
-					"tx %s at block %d", txInfo.Txid,
-					txInfo.BlockHeight)
-				return 0, fmt.Errorf("prevout not included in vin")
-			}
-
-			if !includes(in.PrevOut.Addresses, saddr) {
-				continue
-			}
-
-			// Definitely spends the given address, so subtract the
-			// amount spent.
-			//
-			// Since we're dealing with mined txs, it's safe to use
-			// AmountIn.
-			delta := dcrutil.Amount(tx.TxIn[i].ValueIn)
-			balance -= delta
-			svrLog.Tracef("%s debit input %d %d (curr=%s)", saddr,
-				i, delta, balance)
-		}
-
-		// Now, increase the balance if there are outputs paying to
-		// this address.
-		for i, out := range txInfo.Vout {
-			if !includes(out.ScriptPubKey.Addresses, saddr) {
-				continue
-			}
-
-			delta := dcrutil.Amount(tx.TxOut[i].Value)
-			balance += delta
-			svrLog.Tracef("%s credit output %d %d (curr=%s)", saddr,
-				i, delta, balance)
-		}
-
 	}
-	return balance, nil
+
+	// If we already processed some blocks, we decrease startHeight to the
+	// previous block so we can fetch it and store in prev.
+	if startHeight > 0 {
+		startHeight--
+	}
+
+	svrLog.Infof("Pre-processing accounts in blocks starting at %d", startHeight)
+	var lastHeight int64
+	var prev *wire.MsgBlock
+
+	utxoSet := make(map[wire.OutPoint]*types.PrevInput)
+
+	err = s.processSequentialBlocks(ctx, startHeight, func(bh *chainhash.Hash, b *wire.MsgBlock) error {
+		err := s.preProcessAccountBlock(ctx, bh, b, prev, utxoSet)
+		if err != nil {
+			return err
+		}
+
+		lastHeight = int64(b.Header.Height)
+		if lastHeight%2000 == 0 {
+			svrLog.Infof("Processed up to height %d", lastHeight)
+		}
+		if prev == nil {
+			// First block is just to store prev.
+			prev = b
+			return nil
+		}
+
+		prev = b
+		return err
+	})
+	if err != nil {
+		svrLog.Warnf("Errored processing at height %d: %v", lastHeight, err)
+		return err
+	}
+
+	totalTime := time.Now().Sub(start)
+	svrLog.Infof("Processed all blocks in %s. Last one was %d", totalTime, lastHeight)
+	svrLog.Infof("Utxoset size %d", len(utxoSet))
+	return nil
 }
 
 func (s *Server) AccountBalance(ctx context.Context, req *rtypes.AccountBalanceRequest) (*rtypes.AccountBalanceResponse, *rtypes.Error) {
+	start := time.Now()
+
 	if req.AccountIdentifier == nil {
 		// It doesn't make sense to return "all balances" of the
 		// network.
@@ -192,7 +214,7 @@ func (s *Server) AccountBalance(ctx context.Context, req *rtypes.AccountBalanceR
 
 	// Decode the relevant account(=address).
 	saddr := req.AccountIdentifier.Address
-	addr, err := dcrutil.DecodeAddress(saddr, s.chainParams)
+	_, err := dcrutil.DecodeAddress(saddr, s.chainParams)
 	if err != nil {
 		return nil, types.ErrInvalidAccountIdAddr.RError()
 	}
@@ -208,45 +230,18 @@ func (s *Server) AccountBalance(ctx context.Context, req *rtypes.AccountBalanceR
 	// Track the balance across batches of txs.
 	var balance dcrutil.Amount
 
-	// Process all txs affecting the given addr. Assumes addrindex is on.
-	var skip int
-	count := 100
-	for {
-		// Fetch a batch of transactions.
-		txs, err := s.c.SearchRawTransactionsVerbose(ctx, addr, skip,
-			count, true, false, nil)
-		if err != nil && !strings.Contains(err.Error(), "No Txns available") {
-			return nil, types.DcrdError(err)
-		}
+	err = s.db.View(ctx, func(dbtx backenddb.ReadTx) error {
+		var err error
+		balance, err = s.db.Balance(dbtx, saddr, stopHeight)
+		return err
+	})
+	if err != nil {
+		return nil, types.DcrdError(err)
+	}
 
-		// If we're performing a historical balance check, stop
-		// processing txs after the target stopHeight. We also don't
-		// process mempool txs.
-		for i, tx := range txs {
-			if tx.BlockHeight > stopHeight || tx.BlockHash == "" {
-				txs = txs[:i]
-				break
-			}
-		}
-
-		// If there are no transactions, we're done.
-		if len(txs) == 0 {
-			break
-		}
-
-		// Account for these transactions.
-		balance, err = s.calcFinalBalance(ctx, addr, balance, stopHeight, txs)
-		if err != nil {
-			return nil, types.DcrdError(err)
-		}
-
-		// Fetch the next batch of txs.
-		skip += count
-		if skip%2000 == 0 {
-			svrLog.Infof("%s processed %d txs so far (height=%d stopHeight=%d)",
-				saddr, skip, txs[len(txs)-1].BlockHeight,
-				stopHeight)
-		}
+	delta := time.Now().Sub(start)
+	if delta > 600*time.Millisecond {
+		svrLog.Infof("Slow account: %s %s", saddr, delta)
 	}
 
 	return &rtypes.AccountBalanceResponse{

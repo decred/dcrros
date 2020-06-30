@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/coinbase/rosetta-sdk-go/asserter"
 	rserver "github.com/coinbase/rosetta-sdk-go/server"
@@ -170,6 +171,13 @@ func (s *Server) Routers() []rserver.Router {
 // server's behavior is undefined.
 func (s *Server) Run(ctx context.Context) error {
 	go s.c.Connect(ctx, true)
+	time.Sleep(time.Millisecond * 100)
+
+	err := s.preProcessAccounts(ctx)
+	if err != nil {
+		s.db.Close()
+		return err
+	}
 
 	select {
 	case <-ctx.Done():
