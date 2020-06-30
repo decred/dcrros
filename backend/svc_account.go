@@ -16,6 +16,10 @@ import (
 var _ rserver.AccountAPIServicer = (*Server)(nil)
 
 func updateUtxoSet(op *types.Op, utxoSet map[wire.OutPoint]*types.PrevInput) {
+	if utxoSet == nil {
+		return
+	}
+
 	typ := op.Type
 	st := op.Status
 	switch {
