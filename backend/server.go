@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/coinbase/rosetta-sdk-go/asserter"
@@ -10,6 +11,9 @@ import (
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/lru"
 	"github.com/decred/dcrd/rpcclient/v6"
+	"github.com/decred/dcrros/backend/backenddb"
+	"github.com/decred/dcrros/backend/internal/badgerdb"
+	"github.com/decred/dcrros/backend/internal/memdb"
 )
 
 const (
@@ -18,9 +22,23 @@ const (
 	rosettaVersion = "1.3.1"
 )
 
+type DBType string
+
+const (
+	DBTypeMem       DBType = "mem"
+	DBTypeBadger    DBType = "badger"
+	DBTypeBadgerMem DBType = "badgermem"
+)
+
+func SupportedDBTypes() []DBType {
+	return []DBType{DBTypeMem, DBTypeBadger, DBTypeBadgerMem}
+}
+
 type ServerConfig struct {
 	ChainParams *chaincfg.Params
 	DcrdCfg     *rpcclient.ConnConfig
+	DBType      DBType
+	DBDir       string
 }
 
 type Server struct {
@@ -29,6 +47,7 @@ type Server struct {
 	chainParams *chaincfg.Params
 	asserter    *asserter.Asserter
 	network     *rtypes.NetworkIdentifier
+	db          backenddb.DB
 
 	blocks      *lru.KVCache
 	blockHashes *lru.KVCache
@@ -56,6 +75,22 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	blockHashCache := lru.NewKVCache(0)
 	accountTxsCache := lru.NewKVCache(0)
 	txsCache := lru.NewKVCache(0)
+
+	var db backenddb.DB
+	switch cfg.DBType {
+	case DBTypeMem:
+		db, err = memdb.NewMemDB()
+	case DBTypeBadger:
+		db, err = badgerdb.NewBadgerDB(cfg.DBDir)
+	case DBTypeBadgerMem:
+		db, err = badgerdb.NewBadgerDB("")
+	default:
+		err = errors.New("unknown db type")
+	}
+	if err != nil {
+		return nil, err
+	}
+
 	s := &Server{
 		chainParams: cfg.ChainParams,
 		asserter:    astr,
@@ -65,6 +100,7 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		blockHashes: &blockHashCache,
 		accountTxs:  &accountTxsCache,
 		rawTxs:      &txsCache,
+		db:          db,
 	}
 
 	// We make a copy of the passed config because we change some of the
@@ -76,6 +112,7 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	connCfg.HTTPPostMode = false
 	s.c, err = rpcclient.New(&connCfg, s.ntfnHandlers())
 	if err != nil {
+		db.Close()
 		return nil, err
 	}
 
@@ -137,5 +174,6 @@ func (s *Server) Run(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 	}
+	s.db.Close()
 	return ctx.Err()
 }

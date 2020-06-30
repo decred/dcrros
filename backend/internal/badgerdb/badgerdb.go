@@ -34,12 +34,16 @@ type BadgerDB struct {
 func NewBadgerDB(filepath string) (*BadgerDB, error) {
 	var db *badger.DB
 	var err error
-	if filepath == "" {
-		db, err = badger.Open(badger.DefaultOptions("").WithInMemory(true))
-	} else {
+	var opts badger.Options
 
-		db, err = badger.Open(badger.DefaultOptions(filepath))
+	if filepath == "" {
+		opts = badger.DefaultOptions("").WithInMemory(true)
+	} else {
+		opts = badger.DefaultOptions(filepath)
 	}
+
+	opts = opts.WithLogger(badgerSlogAdapter{})
+	db, err = badger.Open(opts)
 	if err != nil {
 		return nil, err
 	}

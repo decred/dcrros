@@ -65,6 +65,7 @@ const (
 	defaultLogLevel       = "info"
 	defaultActiveNet      = cnMainNet
 	defaultBindAddr       = ":8088"
+	defaultDBType         = backend.DBTypeMem
 )
 
 var (
@@ -85,6 +86,7 @@ type config struct {
 	Listeners  []string `long:"listen" description:"Add an interface/port to listen for connections (default all interfaces port: 9128, testnet: 19128, simnet: 29128)"`
 	DebugLevel string   `short:"d" long:"debuglevel" description:"Logging level for all subsystems {trace, debug, info, warn, error, critical} -- You may also specify <subsystem>=<level>,<subsystem2>=<level>,... to set the log level for individual subsystems -- Use show to list available subsystems"`
 	Profile    string   `long:"profile" description:"Enable HTTP profiling on given [addr:]port -- NOTE port must be between 1024 and 65536"`
+	DBType     string   `long:"dbtype" description:"Database backend to use for the Block Chain"`
 
 	// Network
 
@@ -149,9 +151,43 @@ func (c *config) serverConfig() (*backend.ServerConfig, error) {
 		return nil, fmt.Errorf("unknown active net: %s", c.activeNet)
 	}
 
+	dbType := backend.DBType(c.DBType)
+	supported := backend.SupportedDBTypes()
+	found := false
+	for _, sup := range supported {
+		if sup == dbType {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("unknown db type: %s (supports %v)",
+			dbType, supported)
+	}
+	dbDir := filepath.Join(defaultDataDir, string(c.activeNet), "db")
+
+	if dbType == backend.DBTypeBadger {
+		err := os.MkdirAll(dbDir, 0700)
+		if err != nil {
+			// Show a nicer error message if it's because a symlink is
+			// linked to a directory that does not exist (probably because
+			// it's not mounted).
+			if e, ok := err.(*os.PathError); ok && os.IsExist(err) {
+				if link, lerr := os.Readlink(e.Path); lerr == nil {
+					str := "is symlink %s -> %s mounted?"
+					err = fmt.Errorf(str, e.Path, link)
+				}
+			}
+
+			return nil, fmt.Errorf("failed to create db dir: %v", err)
+		}
+	}
+
 	return &backend.ServerConfig{
 		ChainParams: chain,
 		DcrdCfg:     c.dcrdConnConfig(),
+		DBType:      dbType,
+		DBDir:       dbDir,
 	}, nil
 }
 
@@ -231,6 +267,7 @@ func loadConfig() (*config, []string, error) {
 	cfg := config{
 		DcrdCertPath: defaultDcrdCertPath,
 		DebugLevel:   defaultLogLevel,
+		DBType:       string(defaultDBType),
 	}
 
 	// Pre-parse the command line options to see if an alternative config
@@ -402,10 +439,11 @@ func loadConfig() (*config, []string, error) {
 	}
 
 	// Attempt an early connection to the dcrd server and verify if it's a
-	// reasonable backend for dcrros operations. We ignore the error here
-	// because it's only possible due to unspecified network (which
-	// shouldn't happen in this function).
-	svrCfg, _ := cfg.serverConfig()
+	// reasonable backend for dcrros operations.
+	svrCfg, err := cfg.serverConfig()
+	if err != nil {
+		return nil, nil, err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err = backend.CheckDcrd(ctx, svrCfg)

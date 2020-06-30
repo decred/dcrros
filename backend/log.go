@@ -6,16 +6,20 @@
 package backend
 
 import (
+	"github.com/decred/dcrros/backend/internal/badgerdb"
 	"github.com/decred/slog"
 )
 
-// log is a logger that is initialized with no output filters.  This
-// means the package will not perform any logging by default until the caller
-// requests it.
-// The default amount of logging is none.
-var svrLog = slog.Disabled
+var (
+	svrLog = slog.Disabled
+)
 
 // UseLogger uses a specified Logger to output package logging info.
 func UseLogger(logger slog.Logger) {
 	svrLog = logger
+}
+
+// UseBadgerLogger specifies the logger to use for badger db instances.
+func UseBadgerLogger(logger slog.Logger) {
+	badgerdb.UseLogger(logger)
 }
