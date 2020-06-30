@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
@@ -246,4 +247,52 @@ func (s *Server) getRawTx(ctx context.Context, txh *chainhash.Hash) (*wire.MsgTx
 	}
 
 	return nil, err
+}
+
+func (s *Server) processSequentialBlocks(ctx context.Context, startHeight int64, f func(*chainhash.Hash, *wire.MsgBlock) error) error {
+	concurrency := int64(runtime.NumCPU())
+	type gbbhReply struct {
+		block *wire.MsgBlock
+		hash  *chainhash.Hash
+		err   error
+	}
+	chans := make([]chan gbbhReply, concurrency)
+	gctx, cancel := context.WithCancel(ctx)
+	for i := startHeight; i < startHeight+concurrency; i++ {
+		c := make(chan gbbhReply)
+		chans[i%concurrency] = c
+		start := startHeight + ((i - startHeight) % concurrency)
+		go func() {
+			i := int64(0)
+			for {
+				bh, bl, err := s.getBlockByHeight(gctx, start+i)
+				select {
+				case c <- gbbhReply{block: bl, hash: bh, err: err}:
+				case <-gctx.Done():
+					return
+				}
+				i += concurrency
+			}
+		}()
+	}
+
+	var err error
+	for i := startHeight; err == nil; i++ {
+		var next gbbhReply
+		select {
+		case next = <-chans[i%concurrency]:
+			err = next.err
+		case <-gctx.Done():
+			err = gctx.Err()
+		}
+		if err == nil {
+			err = f(next.hash, next.block)
+		}
+	}
+	cancel()
+	if err == types.ErrBlockIndexAfterTip {
+		return nil
+	}
+
+	return err
 }
