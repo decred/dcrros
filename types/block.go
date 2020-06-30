@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -36,33 +37,37 @@ func VoteBitsApprovesParent(voteBits uint16) bool {
 	return voteBits&0x01 == 0x01
 }
 
+func rawPkScriptToAccountAddr(version uint16, pkScript []byte) string {
+	addrBytes := make([]byte, 2+2*2+2*len(pkScript))
+	addrBytes[0] = 0x30 // "0"
+	addrBytes[1] = 0x78 // "x"
+	versionBytes := []byte{byte(version >> 8), byte(version)}
+	hex.Encode(addrBytes[2:6], versionBytes)
+	hex.Encode(addrBytes[6:], pkScript)
+	return string(addrBytes)
+}
+
 func dcrPkScriptToAccountAddr(version uint16, pkScript []byte, chainParams *chaincfg.Params) (string, error) {
 	if version != 0 {
-		return "", nil
+		// Versions other than 0 aren't standardized yet, so return as
+		// a raw hex string with a "0x" prefix.
+		return rawPkScriptToAccountAddr(version, pkScript), nil
 	}
 
 	_, addrs, _, err := txscript.ExtractPkScriptAddrs(version, pkScript, chainParams)
 	if err != nil {
+		// Currently the only possible error is due to version != 0,
+		// which is handled above, but err on the side of caution.
 		return "", err
 	}
 
 	if len(addrs) != 1 {
 		// TODO: support 'bare' (non-p2sh) multisig?
-		return "", nil
+		return rawPkScriptToAccountAddr(version, pkScript), nil
 	}
 
 	saddr := addrs[0].Address()
 	return saddr, nil
-}
-
-func dcrPkScriptToAccount(version uint16, pkScript []byte, chainParams *chaincfg.Params) (*rtypes.AccountIdentifier, error) {
-	saddr, err := dcrPkScriptToAccountAddr(version, pkScript, chainParams)
-	if err != nil {
-		return nil, err
-	}
-	return &rtypes.AccountIdentifier{
-		Address: addrs[0].Address(),
-	}, nil
 }
 
 type PrevInput struct {
