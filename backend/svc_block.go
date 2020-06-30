@@ -22,19 +22,23 @@ func (s *Server) inputsFetcher(ctx context.Context, inputList ...*wire.OutPoint)
 	for _, in := range inputList {
 		txs[in.Hash] = nil
 	}
+	txhs := make([]chainhash.Hash, 0, len(txs))
+	for txh := range txs {
+		txhs = append(txhs, txh)
+	}
 
 	// Now, request the txs concurrently from dcrd (assumes txindex is on).
 	g, gctx := errgroup.WithContext(ctx)
 	var mu sync.Mutex
-	for txh := range txs {
+	for _, txh := range txhs {
 		txh := txh
 		g.Go(func() error {
-			tx, err := s.c.GetRawTransaction(gctx, &txh)
+			tx, err := s.getRawTx(gctx, &txh)
 			if err != nil {
 				return err
 			}
 			mu.Lock()
-			txs[txh] = tx.MsgTx()
+			txs[txh] = tx
 			mu.Unlock()
 			return nil
 		})
