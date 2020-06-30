@@ -42,8 +42,8 @@ func (s *Server) MempoolTransaction(ctx context.Context, req *rtypes.MempoolTran
 	}
 
 	// TODO: What if the returned tx has already been mined?
-
-	rtx, err := types.MempoolTxToRosetta(tx.MsgTx(), s.makeInputsFetcher(ctx), s.chainParams)
+	fetchInputs := s.makeInputsFetcher(ctx, nil)
+	rtx, err := types.MempoolTxToRosetta(tx.MsgTx(), fetchInputs, s.chainParams)
 	if err != nil {
 		return nil, types.RError(err)
 	}

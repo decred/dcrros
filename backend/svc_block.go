@@ -16,15 +16,25 @@ import (
 
 var _ rserver.BlockAPIServicer = (*Server)(nil)
 
-func (s *Server) inputsFetcher(ctx context.Context, inputList ...*wire.OutPoint) (map[wire.OutPoint]*types.PrevInput, error) {
+func (s *Server) inputsFetcher(ctx context.Context, utxoSet map[wire.OutPoint]*types.PrevInput, inputList ...*wire.OutPoint) (map[wire.OutPoint]*types.PrevInput, error) {
+	res := make(map[wire.OutPoint]*types.PrevInput, len(inputList))
+
 	// First, dedupe the needed txs.
-	txs := make(map[chainhash.Hash]*wire.MsgTx, len(inputList))
+	txs := make(map[chainhash.Hash]*wire.MsgTx)
 	for _, in := range inputList {
+		if prev, ok := utxoSet[*in]; ok {
+			res[*in] = prev
+			continue
+		}
 		txs[in.Hash] = nil
 	}
 	txhs := make([]chainhash.Hash, 0, len(txs))
 	for txh := range txs {
 		txhs = append(txhs, txh)
+	}
+	if len(txhs) == 0 {
+		// The utxoSet already had all entries.
+		return res, nil
 	}
 
 	// Now, request the txs concurrently from dcrd (assumes txindex is on).
@@ -50,9 +60,12 @@ func (s *Server) inputsFetcher(ctx context.Context, inputList ...*wire.OutPoint)
 	}
 
 	// Now build the resulting map.
-	res := make(map[wire.OutPoint]*types.PrevInput, len(inputList))
 	for _, in := range inputList {
 		tx := txs[in.Hash]
+		if tx == nil {
+			// Already got it through the utxoSet.
+			continue
+		}
 		if len(tx.TxOut) <= int(in.Index) {
 			return nil, fmt.Errorf("non-existant output index %s", in.String())
 		}
@@ -67,9 +80,9 @@ func (s *Server) inputsFetcher(ctx context.Context, inputList ...*wire.OutPoint)
 	return res, nil
 }
 
-func (s *Server) makeInputsFetcher(ctx context.Context) types.PrevInputsFetcher {
+func (s *Server) makeInputsFetcher(ctx context.Context, utxoSet map[wire.OutPoint]*types.PrevInput) types.PrevInputsFetcher {
 	return func(inputList ...*wire.OutPoint) (map[wire.OutPoint]*types.PrevInput, error) {
-		return s.inputsFetcher(ctx, inputList...)
+		return s.inputsFetcher(ctx, utxoSet, inputList...)
 	}
 }
 
@@ -96,7 +109,7 @@ func (s *Server) Block(ctx context.Context, req *rtypes.BlockRequest) (*rtypes.B
 		}
 	}
 
-	fetchInputs := s.makeInputsFetcher(ctx)
+	fetchInputs := s.makeInputsFetcher(ctx, nil)
 	rblock, err := types.WireBlockToRosetta(b, prev, fetchInputs, s.chainParams)
 	if err != nil {
 		return nil, types.RError(err)
