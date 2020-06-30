@@ -3,11 +3,14 @@ package backend
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrjson/v3"
+	"github.com/decred/dcrd/dcrutil/v3"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/rpcclient/v6"
 	"github.com/decred/dcrd/wire"
 	"github.com/decred/dcrros/types"
@@ -107,8 +110,14 @@ func (s *Server) bestBlock(ctx context.Context) (*chainhash.Hash, int64, *wire.M
 //
 // It returns a types.ErrBlockNotFound if the given block is not found.
 func (s *Server) getBlock(ctx context.Context, bh *chainhash.Hash) (*wire.MsgBlock, error) {
+	bl, ok := s.blocks.Lookup(*bh)
+	if ok {
+		return bl.(*wire.MsgBlock), nil
+	}
+
 	b, err := s.c.GetBlock(ctx, bh)
 	if err == nil {
+		s.blocks.Add(*bh, b)
 		return b, err
 	}
 
@@ -126,8 +135,15 @@ func (s *Server) getBlock(ctx context.Context, bh *chainhash.Hash) (*wire.MsgBlo
 // It returns a types.ErrBlockIndexPastTip if the given block height doesn't
 // exist in the blockchain.
 func (s *Server) getBlockHash(ctx context.Context, height int64) (*chainhash.Hash, error) {
+	// TODO: not safe when close to tip due to reorgs.
+	bhh, ok := s.blockHashes.Lookup(height)
+	if ok {
+		return bhh.(*chainhash.Hash), nil
+	}
+
 	bh, err := s.c.GetBlockHash(ctx, height)
 	if err == nil {
+		s.blockHashes.Add(height, bh)
 		return bh, nil
 	}
 
@@ -192,4 +208,42 @@ func (s *Server) getBlockByPartialId(ctx context.Context, bli *rtypes.PartialBlo
 		return nil, 0, nil, err
 	}
 	return bh, int64(b.Header.Height), b, nil
+}
+
+func (s *Server) searchRawTxs(ctx context.Context,
+	address dcrutil.Address, skip, count int) ([]*chainjson.SearchRawTransactionsResult, error) {
+
+	// TODO: count should be fixed. This might not be safe due to reorgs.
+	k := fmt.Sprintf("%s_%d", address.Address(), skip)
+	rc, ok := s.accountTxs.Lookup(k)
+	if ok {
+		return rc.([]*chainjson.SearchRawTransactionsResult), nil
+	}
+
+	res, err := s.c.SearchRawTransactionsVerbose(ctx, address, skip, count, true, false, nil)
+	if err != nil && !strings.Contains(err.Error(), "No Txns available") {
+		return nil, err
+	}
+	if res == nil {
+		// Ensure no nils on valid responses.
+		res = make([]*chainjson.SearchRawTransactionsResult, 0)
+	}
+
+	s.accountTxs.Add(k, res)
+
+	return res, nil
+}
+
+func (s *Server) getRawTx(ctx context.Context, txh *chainhash.Hash) (*wire.MsgTx, error) {
+	if tx, ok := s.rawTxs.Lookup(*txh); ok {
+		return tx.(*wire.MsgTx), nil
+	}
+
+	tx, err := s.c.GetRawTransaction(ctx, txh)
+	if err == nil {
+		s.rawTxs.Add(*txh, tx.MsgTx())
+		return tx.MsgTx(), nil
+	}
+
+	return nil, err
 }

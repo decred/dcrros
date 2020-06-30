@@ -64,6 +64,8 @@ github.com/decred/dcrd/dcrutil/v3 v3.0.0-20200616182840-3baf1f590cb1 h1:uiMnZy+Y
 github.com/decred/dcrd/dcrutil/v3 v3.0.0-20200616182840-3baf1f590cb1/go.mod h1:WyoYp6FRgNAQL33CdcpvSnKcujH8wMzIRBSMCg64Egw=
 github.com/decred/dcrd/gcs/v2 v2.0.1 h1:A6OQLuvffyMWdvGvj+xIgx/WyuWCLQbSnbYpT2frKTo=
 github.com/decred/dcrd/gcs/v2 v2.0.1/go.mod h1:3XjKcrtvB+r2ezhIsyNCLk6dRnXRJVyYmsd1P3SkU3o=
+github.com/decred/dcrd/lru v1.0.1-0.20200219013519-e26e71a9a21f h1:e/QUyktJatIlTow508kTjQWsuSWbodqiO3+AhL+V3zQ=
+github.com/decred/dcrd/lru v1.0.1-0.20200219013519-e26e71a9a21f/go.mod h1:mxKOwFd7lFjN2GZYsiz/ecgqR6kkYAl+0pz0tEMk218=
 github.com/decred/dcrd/rpc/jsonrpc/types/v2 v2.0.1-0.20200503044000-76f6906e50e5 h1:O8kpj3huIKO6N+KiyndTPTJwoo/Q0Jq+92Do511CGoE=
 github.com/decred/dcrd/rpc/jsonrpc/types/v2 v2.0.1-0.20200503044000-76f6906e50e5/go.mod h1:c5S+PtQWNIA2aUakgrLhrlopkMadcOv51dWhCEdo49c=
 github.com/decred/dcrd/rpcclient/v6 v6.0.0-20200616182840-3baf1f590cb1 h1:wwaDUHBjyfSH7RkJ0kdit7cpT/i5+vpP85raWXKDrGc=

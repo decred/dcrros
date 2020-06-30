@@ -8,6 +8,7 @@ import (
 	rserver "github.com/coinbase/rosetta-sdk-go/server"
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/v3"
+	"github.com/decred/dcrd/lru"
 	"github.com/decred/dcrd/rpcclient/v6"
 )
 
@@ -29,6 +30,11 @@ type Server struct {
 	asserter    *asserter.Asserter
 	network     *rtypes.NetworkIdentifier
 
+	blocks      *lru.KVCache
+	blockHashes *lru.KVCache
+	accountTxs  *lru.KVCache
+	rawTxs      *lru.KVCache
+
 	// The given mtx mutex protects the following fields.
 	mtx         sync.Mutex
 	active      bool
@@ -45,11 +51,20 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	blockCache := lru.NewKVCache(0)
+	blockHashCache := lru.NewKVCache(0)
+	accountTxsCache := lru.NewKVCache(0)
+	txsCache := lru.NewKVCache(0)
 	s := &Server{
 		chainParams: cfg.ChainParams,
 		asserter:    astr,
 		network:     network,
 		ctx:         ctx,
+		blocks:      &blockCache,
+		blockHashes: &blockHashCache,
+		accountTxs:  &accountTxsCache,
+		rawTxs:      &txsCache,
 	}
 
 	// We make a copy of the passed config because we change some of the
