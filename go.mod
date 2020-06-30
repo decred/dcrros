@@ -16,6 +16,7 @@ require (
 	github.com/decred/dcrd/txscript/v3 v3.0.0-20200623174822-e2d77e4e7efe
 	github.com/decred/dcrd/wire v1.3.0
 	github.com/decred/slog v1.0.0
+	github.com/dgraph-io/badger/v2 v2.0.3
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/jrick/logrotate v1.0.0
 	golang.org/x/sync v0.0.0-20200317015054-43a5402ce75a
