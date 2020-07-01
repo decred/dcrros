@@ -31,15 +31,18 @@ const (
 //
 // This method returns the version string reported by the dcrd instance.
 func checkDcrd(ctx context.Context, c *rpcclient.Client, chain *chaincfg.Params) (string, error) {
-	info, err := c.GetBlockChainInfo(ctx)
-	if err != nil {
-		return "", fmt.Errorf("unable to get blockchain info from dcrd: %v", err)
-	}
+	// FIXME: disabled due to dcrd # 2235.
+	/*
+		info, err := c.GetBlockChainInfo(ctx)
+		if err != nil {
+			return "", fmt.Errorf("unable to get blockchain info from dcrd: %v", err)
+		}
 
-	if info.Chain != chain.Name {
-		return "", fmt.Errorf("dcrros and dcrd network mismatch (want %s, "+
-			"got %s)", chain.Name, info.Chain)
-	}
+		if info.Chain != chain.Name {
+			return "", fmt.Errorf("dcrros and dcrd network mismatch (want %s, "+
+				"got %s)", chain.Name, info.Chain)
+		}
+	*/
 
 	version, err := c.Version(ctx)
 	if err != nil {
