@@ -44,20 +44,18 @@ var (
 	logRotator *rotator.Rotator
 
 	log     = backendLog.Logger("DROS")
-	srvrLog = backendLog.Logger("SRVR")
 	bdgrLog = backendLog.Logger("BDGR")
 )
 
 // Initialize package-global logger variables.
 func init() {
-	backend.UseLogger(srvrLog)
+	backend.UseLogger(log)
 	backend.UseBadgerLogger(bdgrLog)
 }
 
 // subsystemLoggers maps each subsystem identifier to its associated logger.
 var subsystemLoggers = map[string]slog.Logger{
 	"DROS": log,
-	"SRVR": srvrLog,
 	"BDGR": bdgrLog,
 }
 
