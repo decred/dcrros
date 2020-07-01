@@ -1,0 +1,45 @@
+# This is the _development_ version of the Dockerfile, useful for testing the
+# latest versions of dcrd and dcrros and also used while developing the docker 
+# images themselves.
+
+# Stage 1: Build the bins in a golang image.
+FROM golang:1.14-buster AS builder
+
+# Build the latest dcrd and dcrctl. The commented lines allow you to pick
+# a specific version if needed.
+RUN git clone https://github.com/decred/dcrd
+# RUN (cd dcrd && git checkout [commit hash])
+RUN (cd dcrd && go install .)
+RUN git clone https://github.com/decred/dcrctl
+# RUN (cd dcrctl && git checkout [commit hash])
+RUN (cd dcrctl && go install .)
+
+# Build from the current dir.
+copy . dcrros
+RUN (cd dcrros && go install .)
+
+# Stage 2: Build the final image starting from a cleaner base.
+FROM debian:buster
+
+# Copy the previously built bins.
+COPY --from=builder /go/bin/dcrd bin/dcrd
+COPY --from=builder /go/bin/dcrctl bin/dcrctl
+COPY --from=builder /go/bin/dcrros bin/dcrros
+
+# According to Rosetta's documentation, all data should be in /data.
+WORKDIR /data
+
+# Expose dcrros and dcrd ports for mainnet, testnet and simnet. Each line is:
+# 	dcrros    dcrd-p2p  dcrd-rpc
+EXPOSE  9128/tcp  9108/tcp  9109/tcp 
+EXPOSE 19128/tcp 19108/tcp 19109/tcp 
+EXPOSE 29128/tcp 19556/tcp 18555/tcp
+
+# The main executable for this is dcrros, running dcrd in "embedded" mode:
+# dcrros runs dcrd and controls the lifetime of its process. Once dcrros is
+# commanded to stop, it stops the underlying dcrd.
+ENTRYPOINT ["dcrros", \
+	"--appdata=/data/dcrros", \
+	"--rundcrd=dcrd", \
+	"--dcrdextraarg=\"--appdata=/data/dcrd\"", \
+	"--dcrdcertpath=/data/dcrd/rpc.cert" ]
