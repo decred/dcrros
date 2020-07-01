@@ -7,6 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrros/backend/backenddb"
+	"decred.org/dcrros/backend/internal/badgerdb"
+	"decred.org/dcrros/backend/internal/memdb"
 	"github.com/coinbase/rosetta-sdk-go/asserter"
 	rserver "github.com/coinbase/rosetta-sdk-go/server"
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
@@ -14,9 +17,6 @@ import (
 	"github.com/decred/dcrd/lru"
 	"github.com/decred/dcrd/rpcclient/v6"
 	"github.com/decred/dcrd/wire"
-	"github.com/decred/dcrros/backend/backenddb"
-	"github.com/decred/dcrros/backend/internal/badgerdb"
-	"github.com/decred/dcrros/backend/internal/memdb"
 )
 
 const (

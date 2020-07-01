@@ -6,7 +6,7 @@
 package backend
 
 import (
-	"github.com/decred/dcrros/backend/internal/badgerdb"
+	"decred.org/dcrros/backend/internal/badgerdb"
 	"github.com/decred/slog"
 )
 

@@ -3,11 +3,11 @@ package backend
 import (
 	"context"
 
+	"decred.org/dcrros/types"
 	rserver "github.com/coinbase/rosetta-sdk-go/server"
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
-	"github.com/decred/dcrros/types"
 )
 
 var _ rserver.MempoolAPIServicer = (*Server)(nil)

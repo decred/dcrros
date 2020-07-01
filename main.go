@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrros/backend"
+	"decred.org/dcrros/internal/version"
 	rserver "github.com/coinbase/rosetta-sdk-go/server"
-	"github.com/decred/dcrros/backend"
-	"github.com/decred/dcrros/internal/version"
 )
 
 type routerify rserver.Route

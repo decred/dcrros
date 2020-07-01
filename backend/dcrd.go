@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"decred.org/dcrros/types"
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
@@ -15,7 +16,6 @@ import (
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/rpcclient/v6"
 	"github.com/decred/dcrd/wire"
-	"github.com/decred/dcrros/types"
 )
 
 const (

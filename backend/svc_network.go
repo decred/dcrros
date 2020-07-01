@@ -4,10 +4,10 @@ import (
 	"context"
 	"runtime"
 
+	"decred.org/dcrros/internal/version"
+	"decred.org/dcrros/types"
 	rserver "github.com/coinbase/rosetta-sdk-go/server"
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
-	"github.com/decred/dcrros/internal/version"
-	"github.com/decred/dcrros/types"
 )
 
 // Compile time directive to ensure Server implements the NetworkAPIServicer

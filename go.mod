@@ -1,4 +1,4 @@
-module github.com/decred/dcrros
+module decred.org/dcrros
 
 go 1.14
 

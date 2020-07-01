@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/decred/dcrros/backend"
+	"decred.org/dcrros/backend"
 	"github.com/decred/slog"
 	"github.com/jrick/logrotate/rotator"
 )

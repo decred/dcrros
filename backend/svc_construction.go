@@ -5,11 +5,11 @@ import (
 	"encoding/hex"
 	"strings"
 
+	"decred.org/dcrros/types"
 	rserver "github.com/coinbase/rosetta-sdk-go/server"
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/dcrjson/v3"
 	"github.com/decred/dcrd/wire"
-	"github.com/decred/dcrros/types"
 )
 
 var _ rserver.ConstructionAPIServicer = (*Server)(nil)
