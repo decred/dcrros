@@ -1,18 +1,19 @@
 package main
 
 import (
-	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrutil/v3"
@@ -66,12 +67,14 @@ const (
 	defaultActiveNet      = cnMainNet
 	defaultBindAddr       = ":8088"
 	defaultDBType         = backend.DBTypeMem
+	defaultDataDirname    = "data"
+	defaultLogDirname     = "logs"
 )
 
 var (
 	defaultConfigDir    = dcrutil.AppDataDir("dcrros", false)
-	defaultDataDir      = filepath.Join(defaultConfigDir, "data")
-	defaultLogDir       = filepath.Join(defaultConfigDir, "logs", string(defaultActiveNet))
+	defaultDataDir      = filepath.Join(defaultConfigDir, defaultDataDirname)
+	defaultLogDir       = filepath.Join(defaultConfigDir, defaultLogDirname, string(defaultActiveNet))
 	defaultConfigFile   = filepath.Join(defaultConfigDir, defaultConfigFilename)
 	defaultDcrdDir      = dcrutil.AppDataDir("dcrd", false)
 	defaultDcrdCertPath = filepath.Join(defaultDcrdDir, "rpc.cert")
@@ -82,6 +85,7 @@ var (
 type config struct {
 	ShowVersion bool `short:"V" long:"version" description:"Display version information and exit"`
 
+	AppData    string   `short:"A" long:"appdata" description:"Path to application home directory"`
 	ConfigFile string   `short:"C" long:"configfile" description:"Path to configuration file"`
 	Listeners  []string `long:"listen" description:"Add an interface/port to listen for connections (default all interfaces port: 9128, testnet: 19128, simnet: 29128)"`
 	DebugLevel string   `short:"d" long:"debuglevel" description:"Logging level for all subsystems {trace, debug, info, warn, error, critical} -- You may also specify <subsystem>=<level>,<subsystem2>=<level>,... to set the log level for individual subsystems -- Use show to list available subsystems"`
@@ -96,11 +100,13 @@ type config struct {
 
 	// Dcrd Connection Options
 
-	DcrdConnect   string `short:"c" long:"dcrdconnect" description:"Network address of the RPC interface of the dcrd node to connect to (default: localhost port 9109, testnet: 19109, simnet: 19556)"`
-	DcrdCertPath  string `long:"dcrdcertpath" description:"File path location of the dcrd RPC certificate"`
-	DcrdCertBytes string `long:"dcrdcertbytes" description:"The pem-encoded RPC certificate for dcrd"`
-	DcrdUser      string `short:"u" long:"dcrduser" description:"RPC username to authenticate with dcrd"`
-	DcrdPass      string `short:"P" long:"dcrdpass" description:"RPC password to authenticate with dcrd"`
+	RunDcrd       string   `long:"rundcrd" description:"Run the given dcrd binary and terminate dcrros if dcrd is killed"`
+	DcrdExtraArgs []string `long:"dcrdextraarg" description:"Extra arguments to provide to dcrd when running it"`
+	DcrdConnect   string   `short:"c" long:"dcrdconnect" description:"Network address of the RPC interface of the dcrd node to connect to (default: localhost port 9109, testnet: 19109, simnet: 19556)"`
+	DcrdCertPath  string   `long:"dcrdcertpath" description:"File path location of the dcrd RPC certificate"`
+	DcrdCertBytes string   `long:"dcrdcertbytes" description:"The pem-encoded RPC certificate for dcrd"`
+	DcrdUser      string   `short:"u" long:"dcrduser" description:"RPC username to authenticate with dcrd"`
+	DcrdPass      string   `short:"P" long:"dcrdpass" description:"RPC password to authenticate with dcrd"`
 
 	// The rest of the members of this struct are filled by loadConfig().
 
@@ -128,14 +134,44 @@ func (c *config) listeners() ([]net.Listener, error) {
 	return list, nil
 }
 
-func (c *config) dcrdConnConfig() *rpcclient.ConnConfig {
+func (c *config) dcrdConnConfig() (*rpcclient.ConnConfig, error) {
+	// Load the appropriate dcrd rpc.cert file.
+	if len(c.DcrdCertBytes) == 0 && c.DcrdCertPath != "" {
+		f, err := ioutil.ReadFile(c.DcrdCertPath)
+		if err != nil {
+			return nil, fmt.Errorf("unable to load dcrd cert "+
+				"file: %v", err)
+		}
+		c.DcrdCertBytes = string(f)
+	}
+
 	return &rpcclient.ConnConfig{
 		Host:         c.DcrdConnect,
 		Endpoint:     "ws",
 		User:         c.DcrdUser,
 		Pass:         c.DcrdPass,
 		Certificates: []byte(c.DcrdCertBytes),
+	}, nil
+}
+
+func (c *config) dcrdArgs() []string {
+	args := []string{
+		"-u=" + c.DcrdUser,
+		"-P=" + c.DcrdPass,
+		"--txindex",
 	}
+	if c.TestNet {
+		args = append(args, "--testnet")
+	}
+	if c.SimNet {
+		args = append(args, "--simnet")
+	}
+
+	for _, extra := range c.DcrdExtraArgs {
+		args = append(args, extra)
+	}
+
+	return args
 }
 
 func (c *config) serverConfig() (*backend.ServerConfig, error) {
@@ -183,12 +219,70 @@ func (c *config) serverConfig() (*backend.ServerConfig, error) {
 		}
 	}
 
+	dcrdCfg, err := c.dcrdConnConfig()
+	if err != nil {
+		return nil, err
+	}
 	return &backend.ServerConfig{
 		ChainParams: chain,
-		DcrdCfg:     c.dcrdConnConfig(),
+		DcrdCfg:     dcrdCfg,
 		DBType:      dbType,
 		DBDir:       dbDir,
 	}, nil
+}
+
+// cleanAndExpandPath expands environment variables and leading ~ in the passed
+// path, cleans the result, and returns it.
+func cleanAndExpandPath(path string) string {
+	// Nothing to do when no path is given.
+	if path == "" {
+		return path
+	}
+
+	// NOTE: The os.ExpandEnv doesn't work with Windows cmd.exe-style
+	// %VARIABLE%, but the variables can still be expanded via POSIX-style
+	// $VARIABLE.
+	path = os.ExpandEnv(path)
+
+	if !strings.HasPrefix(path, "~") {
+		return filepath.Clean(path)
+	}
+
+	// Expand initial ~ to the current user's home directory, or ~otheruser
+	// to otheruser's home directory.  On Windows, both forward and backward
+	// slashes can be used.
+	path = path[1:]
+
+	var pathSeparators string
+	if runtime.GOOS == "windows" {
+		pathSeparators = string(os.PathSeparator) + "/"
+	} else {
+		pathSeparators = string(os.PathSeparator)
+	}
+
+	userName := ""
+	if i := strings.IndexAny(path, pathSeparators); i != -1 {
+		userName = path[:i]
+		path = path[i:]
+	}
+
+	homeDir := ""
+	var u *user.User
+	var err error
+	if userName == "" {
+		u, err = user.Current()
+	} else {
+		u, err = user.Lookup(userName)
+	}
+	if err == nil {
+		homeDir = u.HomeDir
+	}
+	// Fallback to CWD if user lookup fails or user has no home directory.
+	if homeDir == "" {
+		homeDir = "."
+	}
+
+	return filepath.Join(homeDir, path)
 }
 
 // validLogLevel returns whether or not logLevel is a valid debug log level.
@@ -262,9 +356,18 @@ func parseAndSetDebugLevels(debugLevel string) error {
 	return nil
 }
 
+func randString() string {
+	bts := make([]byte, 20)
+	if _, err := rand.Read(bts); err != nil {
+		panic("unable to read random values")
+	}
+	return base64.StdEncoding.EncodeToString(bts)
+}
+
 func loadConfig() (*config, []string, error) {
 	// Default config.
 	cfg := config{
+		ConfigFile:   defaultConfigFile,
 		DcrdCertPath: defaultDcrdCertPath,
 		DebugLevel:   defaultLogLevel,
 		DBType:       string(defaultDBType),
@@ -301,10 +404,22 @@ func loadConfig() (*config, []string, error) {
 		return nil, nil, errCmdDone
 	}
 
-	// If the config file path has not been modified by user, then
-	// we'll use the default config file path.
-	if preCfg.ConfigFile == "" {
-		preCfg.ConfigFile = defaultConfigFile
+	// Update the home directory for dcrros if specified. Since the home
+	// directory is updated, other variables need to be updated to reflect
+	// the new changes.
+	if preCfg.AppData != "" {
+		cfg.AppData, _ = filepath.Abs(cleanAndExpandPath(preCfg.AppData))
+
+		if preCfg.ConfigFile == defaultConfigFile {
+			defaultConfigFile = filepath.Join(cfg.AppData,
+				defaultConfigFilename)
+			preCfg.ConfigFile = defaultConfigFile
+			cfg.ConfigFile = defaultConfigFile
+		} else {
+			cfg.ConfigFile = preCfg.ConfigFile
+		}
+		defaultDataDir = filepath.Join(cfg.AppData, defaultDataDirname)
+		defaultLogDir = filepath.Join(cfg.AppData, defaultLogDirname, string(defaultActiveNet))
 	}
 
 	// Load additional config from file.
@@ -422,34 +537,28 @@ func loadConfig() (*config, []string, error) {
 		}
 	}
 
+	// When using --rundcrd the user shouldn't specify a connection option
+	// as we'll specify one for them.
+	if cfg.DcrdConnect != "" && cfg.RunDcrd != "" {
+		return nil, nil, fmt.Errorf("cannot use both --dcrdconnect and " +
+			"--rundcrd at the same time")
+	}
+
 	// Determine the default dcrd connect address based on the selected
 	// network.
 	if cfg.DcrdConnect == "" {
 		cfg.DcrdConnect = cfg.activeNet.defaultDcrdRPCConnect()
 	}
 
-	// Load the appropriate dcrd rpc.cert file.
-	if len(cfg.DcrdCertBytes) == 0 && cfg.DcrdCertPath != "" {
-		f, err := ioutil.ReadFile(cfg.DcrdCertPath)
-		if err != nil {
-			return nil, nil, fmt.Errorf("unable to load dcrd cert "+
-				"file: %v", err)
+	// When running dcrd ourselves, define a user and password for the rpc
+	// interface.
+	if cfg.RunDcrd != "" {
+		if cfg.DcrdUser == "" {
+			cfg.DcrdUser = randString()
 		}
-		cfg.DcrdCertBytes = string(f)
-	}
-
-	// Attempt an early connection to the dcrd server and verify if it's a
-	// reasonable backend for dcrros operations.
-	svrCfg, err := cfg.serverConfig()
-	if err != nil {
-		return nil, nil, err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	err = backend.CheckDcrd(ctx, svrCfg)
-	if err != nil {
-		return nil, nil, fmt.Errorf("error while checking underlying "+
-			"dcrd: %v", err)
+		if cfg.DcrdPass == "" {
+			cfg.DcrdPass = randString()
+		}
 	}
 
 	// Warn about missing config file only after all other configuration is
