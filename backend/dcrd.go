@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"time"
 
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -93,6 +94,69 @@ func CheckDcrd(ctx context.Context, cfg *ServerConfig) error {
 	_, err = checkDcrd(ctx, c, cfg.ChainParams)
 	c.Disconnect()
 	return err
+}
+
+// waitForBlockchainSync blocks until the underlying dcrd node is synced to the
+// best known chain.
+func (s *Server) waitForBlockchainSync(ctx context.Context) error {
+	var lastLogTime time.Time
+
+	isSimnet := s.chainParams.Name == "simnet"
+
+	// Error msg of decred's issue # 2235.
+	bugMsg := "-32603: hash 0000000000000000000000000000000000000000000000000000000000000000 does not exist"
+	for {
+		info, err := s.c.GetBlockChainInfo(ctx)
+		if err != nil {
+			// Get around a dcrd getblockchaininfo bug.
+			if strings.Contains(err.Error(), bugMsg) {
+				time.Sleep(time.Second)
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
+				continue
+			}
+
+			return fmt.Errorf("unable to get blockchain info from dcrd: %v", err)
+		}
+
+		if info.SyncHeight > 0 && info.SyncHeight <= info.Blocks {
+			svrLog.Infof("Blockchain sync complete at height %d",
+				info.Blocks)
+			return nil
+		}
+
+		if time.Now().Sub(lastLogTime) > time.Minute {
+			svrLog.Infof("Waiting blockchain sync (progress %.2f%%)",
+				info.VerificationProgress*100)
+			lastLogTime = time.Now()
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+
+		// Special case for simnet: if syncHeight is still zero after
+		// the first wait, we'll allow the server to start anyway. This
+		// allows using the server even when the blockchain is empty
+		// and there are no peers to sync to, which is the case on a
+		// newly created, isolated (i.e. single peer) simnet.
+		//
+		// To test having this dcrros instance perform a sync on a
+		// large simnet network and an empty dcrd instance, use
+		// --dcrdrun=dcrd --dcrdextraarg="--connect
+		// [other-simnet-node]" so that it automatically connnects to
+		// the [other-simnet-node], establishing a syncHeight > 0
+		// immediately.
+		if info.SyncHeight == 0 && isSimnet {
+			svrLog.Infof("Ignoring SyncHeight == 0 on simnet")
+			return nil
+		}
+	}
 }
 
 // bestBlock returns the current best block hash, height and decoded block.

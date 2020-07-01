@@ -310,6 +310,11 @@ func (s *Server) Run(ctx context.Context) error {
 	go s.c.Connect(ctx, true)
 	time.Sleep(time.Millisecond * 100)
 
+	if err := s.waitForBlockchainSync(ctx); err != nil {
+		s.db.Close()
+		return err
+	}
+
 	err := s.preProcessAccounts(ctx)
 	if err != nil {
 		s.db.Close()
