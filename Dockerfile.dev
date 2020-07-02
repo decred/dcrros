@@ -21,6 +21,11 @@ RUN (cd dcrros && go install .)
 # Stage 2: Build the final image starting from a cleaner base.
 FROM debian:buster
 
+# Install ca-certificates so dcrd can reach the network seeders.
+RUN apt-get update
+RUN apt-get install -y --no-install-recommends ca-certificates
+RUN update-ca-certificates
+
 # Copy the previously built bins.
 COPY --from=builder /go/bin/dcrd bin/dcrd
 COPY --from=builder /go/bin/dcrctl bin/dcrctl
