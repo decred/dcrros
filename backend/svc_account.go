@@ -174,7 +174,7 @@ func (s *Server) preProcessAccounts(ctx context.Context) error {
 
 	totalTime := time.Now().Sub(start)
 	svrLog.Infof("Processed all blocks in %s. Last one was %d", totalTime, lastHeight)
-	svrLog.Infof("Final utxo set len %d", len(utxoSet))
+	svrLog.Debugf("Final utxo set len %d", len(utxoSet))
 	return nil
 }
 

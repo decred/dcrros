@@ -123,15 +123,15 @@ func (s *Server) waitForBlockchainSync(ctx context.Context) error {
 			return fmt.Errorf("unable to get blockchain info from dcrd: %v", err)
 		}
 
-		if info.SyncHeight > 0 && info.SyncHeight <= info.Blocks {
+		if info.SyncHeight > 0 && !info.InitialBlockDownload && info.SyncHeight <= info.Blocks {
 			svrLog.Infof("Blockchain sync complete at height %d",
 				info.Blocks)
 			return nil
 		}
 
 		if time.Now().Sub(lastLogTime) > time.Minute {
-			svrLog.Infof("Waiting blockchain sync (progress %.2f%%)",
-				info.VerificationProgress*100)
+			svrLog.Infof("Waiting blockchain sync (IBD=%v progress %.2f%%)",
+				info.InitialBlockDownload, info.VerificationProgress*100)
 			lastLogTime = time.Now()
 		}
 
