@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"strings"
 	"time"
 
 	"decred.org/dcrros/backend/backenddb"
@@ -32,18 +31,24 @@ const (
 //
 // This method returns the version string reported by the dcrd instance.
 func checkDcrd(ctx context.Context, c *rpcclient.Client, chain *chaincfg.Params) (string, error) {
-	// FIXME: disabled due to dcrd # 2235.
-	/*
-		info, err := c.GetBlockChainInfo(ctx)
-		if err != nil {
-			return "", fmt.Errorf("unable to get blockchain info from dcrd: %v", err)
-		}
+	chainInfo, err := c.GetBlockChainInfo(ctx)
+	if err != nil {
+		return "", fmt.Errorf("unable to get blockchain info from dcrd: %v", err)
+	}
 
-		if info.Chain != chain.Name {
-			return "", fmt.Errorf("dcrros and dcrd network mismatch (want %s, "+
-				"got %s)", chain.Name, info.Chain)
-		}
-	*/
+	if chainInfo.Chain != chain.Name {
+		return "", fmt.Errorf("dcrros and dcrd network mismatch (want %s, "+
+			"got %s)", chain.Name, chainInfo.Chain)
+	}
+
+	info, err := c.GetInfo(ctx)
+	if err != nil {
+		return "", fmt.Errorf("unable to get info from dcrd: %v", err)
+	}
+
+	if !info.TxIndex {
+		return "", fmt.Errorf("dcrd running without --txindex")
+	}
 
 	version, err := c.Version(ctx)
 	if err != nil {
@@ -112,22 +117,9 @@ func (s *Server) waitForBlockchainSync(ctx context.Context) error {
 
 	isSimnet := s.chainParams.Name == "simnet"
 
-	// Error msg of decred's issue # 2235.
-	bugMsg := "-32603: hash 0000000000000000000000000000000000000000000000000000000000000000 does not exist"
 	for {
 		info, err := s.c.GetBlockChainInfo(ctx)
 		if err != nil {
-			// Get around a dcrd getblockchaininfo bug.
-			if strings.Contains(err.Error(), bugMsg) {
-				time.Sleep(time.Second)
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
-				}
-				continue
-			}
-
 			return fmt.Errorf("unable to get blockchain info from dcrd: %v", err)
 		}
 

@@ -11,8 +11,8 @@ require (
 	github.com/decred/dcrd/dcrjson/v3 v3.0.1
 	github.com/decred/dcrd/dcrutil/v3 v3.0.0-20200616182840-3baf1f590cb1
 	github.com/decred/dcrd/lru v1.0.1-0.20200219013519-e26e71a9a21f
-	github.com/decred/dcrd/rpc/jsonrpc/types/v2 v2.0.1-0.20200503044000-76f6906e50e5
-	github.com/decred/dcrd/rpcclient/v6 v6.0.0-20200616182840-3baf1f590cb1
+	github.com/decred/dcrd/rpc/jsonrpc/types/v2 v2.0.1-0.20200623174822-e2d77e4e7efe
+	github.com/decred/dcrd/rpcclient/v6 v6.0.0-20200623174822-e2d77e4e7efe
 	github.com/decred/dcrd/txscript/v3 v3.0.0-20200623174822-e2d77e4e7efe
 	github.com/decred/dcrd/wire v1.3.0
 	github.com/decred/slog v1.0.0
