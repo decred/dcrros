@@ -121,7 +121,7 @@ func (s *Server) preProcessAccounts(ctx context.Context) error {
 	// Verify if it matches the block at the mainchain at startHeight. If
 	// it doesn't, we'll have to roll back due to a reorg that happened
 	// while we were offline.
-	hash, err := s.getBlockHash(ctx, startHeight)
+	hash, err := s.c.GetBlockHash(ctx, startHeight)
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func (s *Server) preProcessAccounts(ctx context.Context) error {
 					return err
 				}
 
-				hash, err = s.getBlockHash(ctx, startHeight)
+				hash, err = s.c.GetBlockHash(ctx, startHeight)
 				if err != nil {
 					return err
 				}
@@ -203,13 +203,11 @@ func (s *Server) preProcessAccounts(ctx context.Context) error {
 
 	totalTime := time.Now().Sub(start)
 	svrLog.Infof("Processed all blocks in %s. Last one was %d", totalTime, lastHeight)
-	svrLog.Infof("Utxoset size %d", len(utxoSet))
+	svrLog.Infof("Final utxo set len %d", len(utxoSet))
 	return nil
 }
 
 func (s *Server) AccountBalance(ctx context.Context, req *rtypes.AccountBalanceRequest) (*rtypes.AccountBalanceResponse, *rtypes.Error) {
-	start := time.Now()
-
 	if req.AccountIdentifier == nil {
 		// It doesn't make sense to return "all balances" of the
 		// network.
@@ -243,12 +241,7 @@ func (s *Server) AccountBalance(ctx context.Context, req *rtypes.AccountBalanceR
 		return nil, types.DcrdError(err)
 	}
 
-	delta := time.Now().Sub(start)
-	if delta > 600*time.Millisecond {
-		svrLog.Infof("Slow account: %s %s", saddr, delta)
-	}
-
-	return &rtypes.AccountBalanceResponse{
+	res := &rtypes.AccountBalanceResponse{
 		Balances: []*rtypes.Amount{
 			types.DcrAmountToRosetta(balance),
 		},
@@ -256,6 +249,8 @@ func (s *Server) AccountBalance(ctx context.Context, req *rtypes.AccountBalanceR
 			Hash:  stopHash.String(),
 			Index: stopHeight,
 		},
-	}, nil
+	}
+
+	return res, nil
 
 }

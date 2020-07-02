@@ -2,18 +2,18 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
 	"strings"
 	"time"
 
+	"decred.org/dcrros/backend/backenddb"
 	"decred.org/dcrros/types"
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrjson/v3"
-	"github.com/decred/dcrd/dcrutil/v3"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/rpcclient/v6"
 	"github.com/decred/dcrd/wire"
 )
@@ -94,6 +94,15 @@ func CheckDcrd(ctx context.Context, cfg *ServerConfig) error {
 	_, err = checkDcrd(ctx, c, cfg.ChainParams)
 	c.Disconnect()
 	return err
+}
+
+// isErrRPCOutOFRange returns true if the given error is an RPCError with a
+// ErrRPCOutOfRange code.
+func isErrRPCOutOfRange(err error) bool {
+	if rpcerr, ok := err.(*dcrjson.RPCError); ok && rpcerr.Code == dcrjson.ErrRPCOutOfRange {
+		return true
+	}
+	return false
 }
 
 // waitForBlockchainSync blocks until the underlying dcrd node is synced to the
@@ -177,15 +186,17 @@ func (s *Server) bestBlock(ctx context.Context) (*chainhash.Hash, int64, *wire.M
 // getBlockByHeight returns the given block identified by its hash.
 //
 // It returns a types.ErrBlockNotFound if the given block is not found.
+//
+// Note that this can return blocks that have not yet been processed.
 func (s *Server) getBlock(ctx context.Context, bh *chainhash.Hash) (*wire.MsgBlock, error) {
-	bl, ok := s.blocks.Lookup(*bh)
+	bl, ok := s.cacheBlocks.Lookup(*bh)
 	if ok {
 		return bl.(*wire.MsgBlock), nil
 	}
 
 	b, err := s.c.GetBlock(ctx, bh)
 	if err == nil {
-		s.blocks.Add(*bh, b)
+		s.cacheBlocks.Add(*bh, b)
 		return b, err
 	}
 
@@ -202,25 +213,24 @@ func (s *Server) getBlock(ctx context.Context, bh *chainhash.Hash) (*wire.MsgBlo
 //
 // It returns a types.ErrBlockIndexPastTip if the given block height doesn't
 // exist in the blockchain.
+//
+// Note this only returns block hashes for previously processed blocks.
 func (s *Server) getBlockHash(ctx context.Context, height int64) (*chainhash.Hash, error) {
-	// TODO: not safe when close to tip due to reorgs.
-	bhh, ok := s.blockHashes.Lookup(height)
-	if ok {
-		return bhh.(*chainhash.Hash), nil
-	}
+	var bh chainhash.Hash
+	err := s.db.View(ctx, func(dbtx backenddb.ReadTx) error {
+		var err error
+		bh, err = s.db.ProcessedBlockHash(dbtx, height)
+		return err
+	})
 
-	bh, err := s.c.GetBlockHash(ctx, height)
-	if err == nil {
-		s.blockHashes.Add(height, bh)
-		return bh, nil
-	}
-
-	if rpcerr, ok := err.(*dcrjson.RPCError); ok && rpcerr.Code == dcrjson.ErrRPCOutOfRange {
+	switch {
+	case errors.Is(err, backenddb.ErrBlockHeightNotFound):
 		return nil, types.ErrBlockIndexAfterTip
+	case err != nil:
+		return nil, err
+	default:
+		return &bh, nil
 	}
-
-	// TODO: types.DcrdError()
-	return nil, err
 }
 
 // getBlockByHeight returns the block at the given main chain height. It also
@@ -228,6 +238,8 @@ func (s *Server) getBlockHash(ctx context.Context, height int64) (*chainhash.Has
 // BlockHash().
 //
 // It returns a types.ErrBlockNotFound if the given block is not found.
+//
+// Note this only returns blocks that have been processed.
 func (s *Server) getBlockByHeight(ctx context.Context, height int64) (*chainhash.Hash, *wire.MsgBlock, error) {
 	var bh *chainhash.Hash
 	var err error
@@ -243,6 +255,12 @@ func (s *Server) getBlockByHeight(ctx context.Context, height int64) (*chainhash
 	return bh, b, nil
 }
 
+// getBlockByPartialId returns the block identified by the provided Rosetta
+// partial block identifier.
+//
+// Note that when fetching by block hash, an unprocessed block may be returned.
+// When fetching the best block or by height, only processed blocks are
+// returned.
 func (s *Server) getBlockByPartialId(ctx context.Context, bli *rtypes.PartialBlockIdentifier) (*chainhash.Hash, int64, *wire.MsgBlock, error) {
 	var bh *chainhash.Hash
 	var err error
@@ -251,7 +269,14 @@ func (s *Server) getBlockByPartialId(ctx context.Context, bli *rtypes.PartialBlo
 	case bli == nil || (bli.Hash == nil && bli.Index == nil):
 		// Neither hash nor index were specified, so fetch current
 		// block.
-		if bh, err = s.c.GetBestBlockHash(ctx); err != nil {
+		err := s.db.View(ctx, func(dbtx backenddb.ReadTx) error {
+			bhh, _, err := s.db.LastProcessedBlock(dbtx)
+			if err == nil {
+				bh = &bhh
+			}
+			return err
+		})
+		if err != nil {
 			return nil, 0, nil, err
 		}
 
@@ -275,41 +300,18 @@ func (s *Server) getBlockByPartialId(ctx context.Context, bli *rtypes.PartialBlo
 	if err != nil {
 		return nil, 0, nil, err
 	}
+
 	return bh, int64(b.Header.Height), b, nil
 }
 
-func (s *Server) searchRawTxs(ctx context.Context,
-	address dcrutil.Address, skip, count int) ([]*chainjson.SearchRawTransactionsResult, error) {
-
-	// TODO: count should be fixed. This might not be safe due to reorgs.
-	k := fmt.Sprintf("%s_%d", address.Address(), skip)
-	rc, ok := s.accountTxs.Lookup(k)
-	if ok {
-		return rc.([]*chainjson.SearchRawTransactionsResult), nil
-	}
-
-	res, err := s.c.SearchRawTransactionsVerbose(ctx, address, skip, count, true, false, nil)
-	if err != nil && !strings.Contains(err.Error(), "No Txns available") {
-		return nil, err
-	}
-	if res == nil {
-		// Ensure no nils on valid responses.
-		res = make([]*chainjson.SearchRawTransactionsResult, 0)
-	}
-
-	s.accountTxs.Add(k, res)
-
-	return res, nil
-}
-
 func (s *Server) getRawTx(ctx context.Context, txh *chainhash.Hash) (*wire.MsgTx, error) {
-	if tx, ok := s.rawTxs.Lookup(*txh); ok {
+	if tx, ok := s.cacheRawTxs.Lookup(*txh); ok {
 		return tx.(*wire.MsgTx), nil
 	}
 
 	tx, err := s.c.GetRawTransaction(ctx, txh)
 	if err == nil {
-		s.rawTxs.Add(*txh, tx.MsgTx())
+		s.cacheRawTxs.Add(*txh, tx.MsgTx())
 		return tx.MsgTx(), nil
 	}
 
@@ -332,7 +334,14 @@ func (s *Server) processSequentialBlocks(ctx context.Context, startHeight int64,
 		go func() {
 			i := int64(0)
 			for {
-				bh, bl, err := s.getBlockByHeight(gctx, start+i)
+				var bl *wire.MsgBlock
+				bh, err := s.c.GetBlockHash(gctx, start+i)
+				if isErrRPCOutOfRange(err) {
+					err = types.ErrBlockIndexAfterTip
+				}
+				if err == nil {
+					bl, err = s.getBlock(gctx, bh)
+				}
 				select {
 				case c <- gbbhReply{block: bl, hash: bh, err: err}:
 				case <-gctx.Done():

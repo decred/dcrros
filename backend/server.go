@@ -54,6 +54,9 @@ type ServerConfig struct {
 	DcrdCfg     *rpcclient.ConnConfig
 	DBType      DBType
 	DBDir       string
+
+	CacheSizeBlocks uint
+	CacheSizeRawTxs uint
 }
 
 type Server struct {
@@ -64,10 +67,9 @@ type Server struct {
 	network     *rtypes.NetworkIdentifier
 	db          backenddb.DB
 
-	blocks      *lru.KVCache
-	blockHashes *lru.KVCache
-	accountTxs  *lru.KVCache
-	rawTxs      *lru.KVCache
+	// Caches for speeding up operations.
+	cacheBlocks *lru.KVCache
+	cacheRawTxs *lru.KVCache
 
 	// The given mtx mutex protects the following fields.
 	mtx            sync.Mutex
@@ -88,10 +90,9 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		return nil, err
 	}
 
-	blockCache := lru.NewKVCache(0)
-	blockHashCache := lru.NewKVCache(0)
-	accountTxsCache := lru.NewKVCache(0)
-	txsCache := lru.NewKVCache(0)
+	// Setup in-memory caches.
+	cacheBlocks := lru.NewKVCache(cfg.CacheSizeBlocks)
+	cacheRawTxs := lru.NewKVCache(cfg.CacheSizeRawTxs)
 
 	var db backenddb.DB
 	switch cfg.DBType {
@@ -113,10 +114,8 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		asserter:       astr,
 		network:        network,
 		ctx:            ctx,
-		blocks:         &blockCache,
-		blockHashes:    &blockHashCache,
-		accountTxs:     &accountTxsCache,
-		rawTxs:         &txsCache,
+		cacheBlocks:    &cacheBlocks,
+		cacheRawTxs:    &cacheRawTxs,
 		db:             db,
 		blockNtfns:     make([]*blockNtfn, 0),
 		blockNtfnsChan: make(chan struct{}),

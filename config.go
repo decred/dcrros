@@ -69,6 +69,9 @@ const (
 	defaultDBType         = backend.DBTypeMem
 	defaultDataDirname    = "data"
 	defaultLogDirname     = "logs"
+
+	defaultCacheSizeBlocks = 100
+	defaultCacheSizeRawTxs = 250
 )
 
 var (
@@ -85,12 +88,11 @@ var (
 type config struct {
 	ShowVersion bool `short:"V" long:"version" description:"Display version information and exit"`
 
-	AppData    string   `short:"A" long:"appdata" description:"Path to application home directory"`
-	ConfigFile string   `short:"C" long:"configfile" description:"Path to configuration file"`
-	Listeners  []string `long:"listen" description:"Add an interface/port to listen for connections (default all interfaces port: 9128, testnet: 19128, simnet: 29128)"`
-	DebugLevel string   `short:"d" long:"debuglevel" description:"Logging level for all subsystems {trace, debug, info, warn, error, critical} -- You may also specify <subsystem>=<level>,<subsystem2>=<level>,... to set the log level for individual subsystems -- Use show to list available subsystems"`
-	Profile    string   `long:"profile" description:"Enable HTTP profiling on given [addr:]port -- NOTE port must be between 1024 and 65536"`
-	DBType     string   `long:"dbtype" description:"Database backend to use for the Block Chain"`
+	// General Config
+
+	AppData    string `short:"A" long:"appdata" description:"Path to application home directory"`
+	ConfigFile string `short:"C" long:"configfile" description:"Path to configuration file"`
+	DebugLevel string `short:"d" long:"debuglevel" description:"Logging level for all subsystems {trace, debug, info, warn, error, critical} -- You may also specify <subsystem>=<level>,<subsystem2>=<level>,... to set the log level for individual subsystems -- Use show to list available subsystems"`
 
 	// Network
 
@@ -100,13 +102,26 @@ type config struct {
 
 	// Dcrd Connection Options
 
+	DcrdConnect   string `short:"c" long:"dcrdconnect" description:"Network address of the RPC interface of the dcrd node to connect to (default: localhost port 9109, testnet: 19109, simnet: 19556)"`
+	DcrdCertPath  string `long:"dcrdcertpath" description:"File path location of the dcrd RPC certificate"`
+	DcrdCertBytes string `long:"dcrdcertbytes" description:"The pem-encoded RPC certificate for dcrd"`
+	DcrdUser      string `short:"u" long:"dcrduser" description:"RPC username to authenticate with dcrd"`
+	DcrdPass      string `short:"P" long:"dcrdpass" description:"RPC password to authenticate with dcrd"`
+
+	// Listeners
+
+	Listeners []string `long:"listen" description:"Add an interface/port to listen for connections (default all interfaces port: 9128, testnet: 19128, simnet: 29128)"`
+	Profile   string   `long:"profile" description:"Enable HTTP profiling on given [addr:]port -- NOTE port must be between 1024 and 65536"`
+
+	// Embedded dcrd
+
 	RunDcrd       string   `long:"rundcrd" description:"Run the given dcrd binary and terminate dcrros if dcrd is killed"`
 	DcrdExtraArgs []string `long:"dcrdextraarg" description:"Extra arguments to provide to dcrd when running it"`
-	DcrdConnect   string   `short:"c" long:"dcrdconnect" description:"Network address of the RPC interface of the dcrd node to connect to (default: localhost port 9109, testnet: 19109, simnet: 19556)"`
-	DcrdCertPath  string   `long:"dcrdcertpath" description:"File path location of the dcrd RPC certificate"`
-	DcrdCertBytes string   `long:"dcrdcertbytes" description:"The pem-encoded RPC certificate for dcrd"`
-	DcrdUser      string   `short:"u" long:"dcrduser" description:"RPC username to authenticate with dcrd"`
-	DcrdPass      string   `short:"P" long:"dcrdpass" description:"RPC password to authenticate with dcrd"`
+	// Tuning
+
+	DBType          string `long:"dbtype" description:"Database backend to use for the Block Chain"`
+	CacheSizeBlocks uint   `long:"cachesizeblocks" description:"Number of blocks to hold in the in-memory block cache"`
+	CacheSizeRawTxs uint   `long:"cachesizerawtxs" description:"Number of txs to hold in the in-memory tx cache"`
 
 	// The rest of the members of this struct are filled by loadConfig().
 
@@ -224,10 +239,12 @@ func (c *config) serverConfig() (*backend.ServerConfig, error) {
 		return nil, err
 	}
 	return &backend.ServerConfig{
-		ChainParams: chain,
-		DcrdCfg:     dcrdCfg,
-		DBType:      dbType,
-		DBDir:       dbDir,
+		ChainParams:     chain,
+		DcrdCfg:         dcrdCfg,
+		DBType:          dbType,
+		DBDir:           dbDir,
+		CacheSizeBlocks: c.CacheSizeBlocks,
+		CacheSizeRawTxs: c.CacheSizeRawTxs,
 	}, nil
 }
 
@@ -367,10 +384,12 @@ func randString() string {
 func loadConfig() (*config, []string, error) {
 	// Default config.
 	cfg := config{
-		ConfigFile:   defaultConfigFile,
-		DcrdCertPath: defaultDcrdCertPath,
-		DebugLevel:   defaultLogLevel,
-		DBType:       string(defaultDBType),
+		ConfigFile:      defaultConfigFile,
+		DcrdCertPath:    defaultDcrdCertPath,
+		DebugLevel:      defaultLogLevel,
+		DBType:          string(defaultDBType),
+		CacheSizeBlocks: defaultCacheSizeBlocks,
+		CacheSizeRawTxs: defaultCacheSizeRawTxs,
 	}
 
 	// Pre-parse the command line options to see if an alternative config
