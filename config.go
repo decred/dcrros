@@ -66,7 +66,7 @@ const (
 	defaultLogLevel       = "info"
 	defaultActiveNet      = cnMainNet
 	defaultBindAddr       = ":8088"
-	defaultDBType         = backend.DBTypeMem
+	defaultDBType         = backend.DBTypeBadger
 	defaultDataDirname    = "data"
 	defaultLogDirname     = "logs"
 
