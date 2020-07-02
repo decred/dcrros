@@ -13,7 +13,7 @@ FROM golang:1.14-buster AS builder
 #
 # TODO: Switch to the tagged 1.6.0 once that is released.
 RUN git clone https://github.com/decred/dcrd
-RUN (cd dcrd && git checkout e2d77e4e7efea0ca5278f99af9136e2333d9d186)
+RUN (cd dcrd && git checkout cee62c352c75b84f303da419c6b8b56d62c2949e)
 RUN (cd dcrd && go install .)
 RUN git clone https://github.com/decred/dcrctl
 RUN (cd dcrctl && git checkout 44e17b578ad6a7d3769be4574196867b4c34f4e8)
