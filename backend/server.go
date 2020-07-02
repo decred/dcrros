@@ -13,6 +13,7 @@ import (
 	"github.com/coinbase/rosetta-sdk-go/asserter"
 	rserver "github.com/coinbase/rosetta-sdk-go/server"
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
+	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/lru"
 	"github.com/decred/dcrd/rpcclient/v6"
@@ -189,54 +190,137 @@ func (s *Server) onDcrdBlockConnected(blockHeader []byte, transactions [][]byte)
 	s.notifyNewBlockEvent()
 }
 
+// rollbackDbChain rolls back the db chain until we find a common block betwen
+// the db and the blockchain, assuming the chain is at the specified target
+// hash and height.
+//
+// It returns the chainhash and height for the new tip.
+func (s *Server) rollbackDbChain(dbtx backenddb.WriteTx,
+	targetHash *chainhash.Hash, targetHeight int64) (*chainhash.Hash, int64, error) {
+
+	tipHash, tipHeight, err := s.db.LastProcessedBlock(dbtx)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Special case when we don't have anything to do.
+	if targetHeight == tipHeight && targetHash.IsEqual(&tipHash) {
+		return &tipHash, tipHeight, nil
+	}
+
+	// If the target is lower than the current tip, it's likely we're in
+	// the middle of a reorg. Roll back until we find the target height.
+	for tipHeight > 0 && tipHeight > targetHeight {
+		var err error
+
+		svrLog.Debugf("Rolling back rewinded tip %d %s", tipHeight, tipHash)
+		if err = s.db.RollbackTip(dbtx, tipHeight, tipHash); err != nil {
+			return nil, 0, err
+		}
+		if tipHash, tipHeight, err = s.db.LastProcessedBlock(dbtx); err != nil {
+			return nil, 0, err
+		}
+	}
+
+	// If the target is higher than the current tip, we missed some blocks.
+	// Fetch the block hash of the chain at the current height.
+	chainHash := targetHash
+	if targetHeight > tipHeight {
+		var err error
+		chainHash, err = s.c.GetBlockHash(dbtx.Context(), tipHeight)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+
+	// Now roll back until we find a block shared by both our db and the
+	// chain which tip is the targetHash at this moment.
+	rolledBack := false
+	for tipHeight > 0 && !chainHash.IsEqual(&tipHash) {
+		var err error
+		svrLog.Debugf("Rolling back reorged tip %d %s", tipHeight, tipHash)
+
+		if err = s.db.RollbackTip(dbtx, tipHeight, tipHash); err != nil {
+			return nil, 0, err
+		}
+		if tipHash, tipHeight, err = s.db.LastProcessedBlock(dbtx); err != nil {
+			return nil, 0, err
+		}
+		if chainHash, err = s.c.GetBlockHash(dbtx.Context(), tipHeight); err != nil {
+			return nil, 0, err
+		}
+		rolledBack = true
+	}
+
+	if rolledBack {
+		svrLog.Infof("Rolled back db chain to block %d %s", tipHeight, tipHash)
+	}
+	return &tipHash, tipHeight, nil
+}
+
 func (s *Server) handleBlockConnected(ctx context.Context, header *wire.BlockHeader) error {
 
-	blockHash := header.BlockHash()
+	chainHeight := int64(header.Height)
+	chainHash := header.BlockHash()
+
+	svrLog.Debugf("Received connected block %s at height %d", chainHash, chainHeight)
+
+	var tipHeight int64
+	var tipHash *chainhash.Hash
 
 	// Ensure our current tip matches the chain extended by the new block.
-	err := s.db.View(s.ctx, func(dbtx backenddb.ReadTx) error {
-		tipHash, tipHeight, err := s.db.LastProcessedBlock(dbtx)
-		if err != nil {
-			return err
-		}
+	err := s.db.Update(s.ctx, func(dbtx backenddb.WriteTx) error {
+		var err error
+		targetHash := &header.PrevBlock
+		targetHeight := int64(header.Height - 1)
+		tipHash, tipHeight, err = s.rollbackDbChain(dbtx, targetHash, targetHeight)
+		return err
 
-		if tipHash != header.PrevBlock || tipHeight != int64(header.Height-1) {
-			return fmt.Errorf("Current tip %d (%s) does not match "+
-				"prev block of connected block %s",
-				tipHeight, tipHash, blockHash)
-		}
-
-		return nil
 	})
 	if err != nil {
 		return err
 	}
 
 	// Fetch the full previous block.
-	prev, err := s.getBlock(s.ctx, &header.PrevBlock)
+	prev, err := s.getBlock(s.ctx, tipHash)
 	if err != nil {
 		return fmt.Errorf("Unable to fetch previous block %s of connected "+
-			"block %s: %v", header.PrevBlock, blockHash, err)
+			"block %s: %v", header.PrevBlock, chainHash, err)
 	}
 
-	// Fetch the full block as a wire.MsgBlock.
-	//
-	// TODO: avoid having to get this block again (build based on the
-	// header and transactions).
-	b, err := s.getBlock(s.ctx, &blockHash)
-	if err != nil {
-		return fmt.Errorf("Unable to fetch new connected block %s: %v",
-			blockHash, err)
-	}
+	// Now fetch all missing blocks from our tip
+	for tipHeight < chainHeight {
+		// Fetch the next missing block as a wire.MsgBlock. We special
+		// case when the next block is the received connected block to
+		// avoid another roundtrip to dcrd.
+		var err error
+		var nextTipHash *chainhash.Hash
+		if tipHeight+1 == chainHeight {
+			nextTipHash = &chainHash
+		} else {
+			if nextTipHash, err = s.c.GetBlockHash(ctx, tipHeight+1); err != nil {
+				return err
+			}
+		}
 
-	// Process the accounts modified by the block.
-	err = s.preProcessAccountBlock(s.ctx, &blockHash, b, prev, nil)
-	if err != nil {
-		return fmt.Errorf("Unable to process accounts of connected block "+
-			"%s: %v", blockHash, err)
-	}
+		b, err := s.c.GetBlock(ctx, nextTipHash)
+		if err != nil {
+			return fmt.Errorf("Unable to fetch new connected block %s: %v",
+				nextTipHash, err)
+		}
 
-	svrLog.Infof("Connected block %s at height %d", blockHash, header.Height)
+		// Process the accounts modified by the block.
+		err = s.preProcessAccountBlock(s.ctx, nextTipHash, b, prev, nil)
+		if err != nil {
+			return fmt.Errorf("Unable to process accounts of connected block "+
+				"%s: %v", nextTipHash, err)
+		}
+
+		// Advance to next block.
+		prev = b
+		tipHeight++
+		svrLog.Infof("Connected block %s at height %d", nextTipHash, tipHeight)
+	}
 	return nil
 }
 

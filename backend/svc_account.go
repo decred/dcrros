@@ -118,9 +118,9 @@ func (s *Server) preProcessAccounts(ctx context.Context) error {
 		return err
 	}
 
-	// Verify if it matches the block at the mainchain at startHeight. If
-	// it doesn't, we'll have to roll back due to a reorg that happened
-	// while we were offline.
+	// Verify if the last processed block matches the block in the
+	// mainchain at startHeight. If it doesn't, we'll have to roll back due
+	// to a reorg that happened while we were offline.
 	hash, err := s.c.GetBlockHash(ctx, startHeight)
 	if err != nil {
 		return err
@@ -130,53 +130,29 @@ func (s *Server) preProcessAccounts(ctx context.Context) error {
 			"mainchain block %s at height %d. Rolling back.",
 			startHash, hash, startHeight)
 
-		err := s.db.Update(ctx, func(dbtx backenddb.WriteTx) error {
-			for startHeight > 0 {
-				svrLog.Debugf("Rolling back block %d %s",
-					startHeight, startHash)
-				if err := s.db.RollbackTip(dbtx, startHeight, startHash); err != nil {
-					return err
-				}
-
-				startHeight--
-				startHash, err = s.db.ProcessedBlockHash(dbtx, startHeight)
-				if err != nil {
-					return err
-				}
-
-				hash, err = s.c.GetBlockHash(ctx, startHeight)
-				if err != nil {
-					return err
-				}
-
-				if *hash == startHash {
-					break
-				}
-			}
-
-			// Found the starting point.
-			svrLog.Infof("Rolled back tip to block %d %s",
-				startHeight, startHash)
-
-			return nil
+		err := s.db.Update(s.ctx, func(dbtx backenddb.WriteTx) error {
+			var err error
+			hash, startHeight, err = s.rollbackDbChain(dbtx, hash, startHeight)
+			return err
 		})
 		if err != nil {
 			return err
 		}
 	}
 
-	// If we already processed some blocks, we decrease startHeight to the
-	// previous block so we can fetch it and store in prev.
-	if startHeight > 0 {
-		startHeight--
+	// Fetch the block prior to starting to process the chain.
+	prev, err := s.getBlock(ctx, hash)
+	if err != nil {
+		return err
 	}
 
-	svrLog.Infof("Pre-processing accounts in blocks starting at %d", startHeight)
-	var lastHeight int64
-	var prev *wire.MsgBlock
-
+	// Use a utxoSet map to speed up sequential processing when traversing
+	// many blocks (useful during initial startup).
 	utxoSet := make(map[wire.OutPoint]*types.PrevInput)
 
+	// Sequentially process the chain.
+	svrLog.Infof("Pre-processing accounts in blocks starting at %d", startHeight)
+	var lastHeight int64
 	err = s.processSequentialBlocks(ctx, startHeight, func(bh *chainhash.Hash, b *wire.MsgBlock) error {
 		err := s.preProcessAccountBlock(ctx, bh, b, prev, utxoSet)
 		if err != nil {
@@ -186,11 +162,6 @@ func (s *Server) preProcessAccounts(ctx context.Context) error {
 		lastHeight = int64(b.Header.Height)
 		if lastHeight%2000 == 0 {
 			svrLog.Infof("Processed up to height %d", lastHeight)
-		}
-		if prev == nil {
-			// First block is just to store prev.
-			prev = b
-			return nil
 		}
 
 		prev = b

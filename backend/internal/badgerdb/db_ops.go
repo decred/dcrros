@@ -121,27 +121,28 @@ func fetchLastProcessedAccountBlock(dbtx *badger.Txn) (chainhash.Hash, int64, er
 	return hash, height, err
 }
 
-func putProcessedBlock(dbtx *badger.Txn, hash *chainhash.Hash, height int64) error {
-	var v [32]byte
-	k := make([]byte, len(processedBlockHashKeyPrefix)+8)
-	k = k[copy(k[:], processedBlockHashKeyPrefix):]
+func processedBlockKey(height int64) []byte {
+	key := make([]byte, len(processedBlockHashKeyPrefix)+8)
+	k := key[copy(key[:], processedBlockHashKeyPrefix):]
 	binary.BigEndian.PutUint64(k, uint64(height))
+	return key
+}
+
+func putProcessedBlock(dbtx *badger.Txn, hash *chainhash.Hash, height int64) error {
+	k := processedBlockKey(height)
+	var v [32]byte
 	copy(v[:], hash[:])
 	return dbtx.Set(k, v[:])
 }
 
 func delProcessedBlock(dbtx *badger.Txn, height int64) error {
-	k := make([]byte, len(processedBlockHashKeyPrefix)+8)
-	k = k[copy(k[:], processedBlockHashKeyPrefix):]
-	binary.BigEndian.PutUint64(k, uint64(height))
+	k := processedBlockKey(height)
 	return dbtx.Delete(k)
 }
 
 func fetchProcessedBlockHash(dbtx *badger.Txn, height int64) (chainhash.Hash, error) {
 	var hash chainhash.Hash
-	k := make([]byte, len(processedBlockHashKeyPrefix)+8)
-	k = k[copy(k[:], processedBlockHashKeyPrefix):]
-	binary.BigEndian.PutUint64(k, uint64(height))
+	k := processedBlockKey(height)
 	item, err := dbtx.Get(k)
 	if err != nil {
 		return hash, err
@@ -153,17 +154,21 @@ func fetchProcessedBlockHash(dbtx *badger.Txn, height int64) (chainhash.Hash, er
 	return hash, err
 }
 
-func putBlockAccount(dbtx *badger.Txn, height int64, account string) error {
-	k := make([]byte, len(blockAccountsChangedPrefix)+8+len(account))
-	k = k[copy(k, blockAccountsChangedPrefix):]
+func blockAccountKey(height int64, account string) []byte {
+	key := make([]byte, len(blockAccountsChangedPrefix)+8+len(account))
+	k := key[copy(key, blockAccountsChangedPrefix):]
 	binary.BigEndian.PutUint64(k, uint64(height))
 	k = k[8:]
 	copy(k, account)
-	return dbtx.Set(k, nil)
+	return key
+}
+
+func putBlockAccount(dbtx *badger.Txn, height int64, account string) error {
+	return dbtx.Set(blockAccountKey(height, account), nil)
 }
 
 func fetchBlockAccounts(dbtx *badger.Txn, height int64) ([]string, error) {
-	keyPrefix := make([]byte, len(blockAccountsChangedPrefix)+8)
+	keyPrefix := blockAccountKey(height, "")
 	accounts := make([]string, 0)
 	itOpts := badger.DefaultIteratorOptions
 	itOpts.PrefetchValues = false

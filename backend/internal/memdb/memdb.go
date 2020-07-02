@@ -147,23 +147,25 @@ func (db *MemDB) RollbackTip(wtx backenddb.WriteTx, height int64, blockHash chai
 	}
 
 	tx := wtx.(*transaction)
-	if tx.blockHeight != 0 {
-		return fmt.Errorf("cannot rollback tip on a tx that has modified the tip")
+	lastHash := tx.blockHash
+	lastHeight := tx.blockHeight
+	if lastHeight == 0 {
+		lastHash = db.lastBlockHash
+		lastHeight = db.lastHeight
 	}
 
-	if db.lastBlockHash != blockHash || db.lastHeight != height {
+	if lastHash != blockHash || lastHeight != height {
 		return backenddb.ErrNotTip
 	}
-
-	prev := db.processedBlocks[height-1]
 
 	// Remove balance changes from the accounts. This is technically wrong,
 	// in that it removes directly from the db struct instead of storing
 	// the change in a journal-like fashion in the tx, but suffices for the
 	// current use pattern of the db.
-	for _, acct := range prev.accounts {
-		bals, ok := db.balances[acct]
-		if !ok || len(bals) == 0 {
+	oldTip := db.processedBlocks[height]
+	for _, acct := range oldTip.accounts {
+		bals := db.balances[acct]
+		if len(bals) == 0 {
 			continue
 		}
 
@@ -179,6 +181,7 @@ func (db *MemDB) RollbackTip(wtx backenddb.WriteTx, height int64, blockHash chai
 	delete(db.processedBlocks, height)
 
 	// Store the previous block as the new tip.
+	prev := db.processedBlocks[height-1]
 	tx.blockHash = prev.hash
 	tx.blockHeight = height - 1
 	tx.updatedBlock = true
