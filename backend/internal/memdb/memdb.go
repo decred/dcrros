@@ -25,6 +25,7 @@ type transaction struct {
 	ctx             context.Context
 	writable        bool
 	balances        map[string][]balanceHeight
+	updatedBlock    bool
 	blockHash       chainhash.Hash
 	blockHeight     int64
 	processedBlocks map[int64]*processedBlock
@@ -90,7 +91,11 @@ func (db *MemDB) Balance(rtx backenddb.ReadTx, accountAddr string, height int64)
 	return balance, nil
 }
 
-func (db *MemDB) LastProcessedBlock(tx backenddb.ReadTx) (chainhash.Hash, int64, error) {
+func (db *MemDB) LastProcessedBlock(rtx backenddb.ReadTx) (chainhash.Hash, int64, error) {
+	tx := rtx.(*transaction)
+	if tx.updatedBlock {
+		return tx.blockHash, tx.blockHeight, nil
+	}
 	return db.lastBlockHash, db.lastHeight, nil
 }
 
@@ -114,6 +119,7 @@ func (db *MemDB) StoreBalances(wtx backenddb.WriteTx, blockHash chainhash.Hash, 
 
 	tx.blockHash = blockHash
 	tx.blockHeight = height
+	tx.updatedBlock = true
 
 	return nil
 }
@@ -175,6 +181,7 @@ func (db *MemDB) RollbackTip(wtx backenddb.WriteTx, height int64, blockHash chai
 	// Store the previous block as the new tip.
 	tx.blockHash = prev.hash
 	tx.blockHeight = height - 1
+	tx.updatedBlock = true
 
 	return nil
 }
@@ -212,8 +219,10 @@ func (db *MemDB) Update(ctx context.Context, f func(tx backenddb.WriteTx) error)
 	}
 
 	// Record the last processed height.
-	db.lastBlockHash = tx.blockHash
-	db.lastHeight = tx.blockHeight
+	if tx.updatedBlock {
+		db.lastBlockHash = tx.blockHash
+		db.lastHeight = tx.blockHeight
+	}
 
 	return nil
 }
