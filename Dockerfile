@@ -19,7 +19,7 @@ RUN git clone https://github.com/decred/dcrctl
 RUN (cd dcrctl && git checkout 44e17b578ad6a7d3769be4574196867b4c34f4e8)
 RUN (cd dcrctl && go install .)
 RUN git clone https://github.com/decred/dcrros
-RUN (cd dcrros && git checkout e3de6d1860693527c144c6d66b71f6b591c176b8)
+RUN (cd dcrros && git checkout aa76a84a19fcda926bd30ea6eaa29815d9b907dd)
 RUN (cd dcrros && go install .)
 
 # Stage 2: Build the final image starting from a cleaner base.
