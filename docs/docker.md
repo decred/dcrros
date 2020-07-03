@@ -16,7 +16,7 @@ The container will automatically run `dcrros` which will itself run and monitor 
 
 # Docker run options
 
-The rest of this section will discuss available options for configuring the `dcrros` deployment and relevant `dcrd` configuration parameters. For full details on `dcrd`, please see the [dcrd repository](https://github.com/decerd/dcrd).
+The rest of this section will discuss available options for configuring the `dcrros` deployment and relevant `dcrd` configuration parameters. For full details on `dcrd`, please see the [dcrd repository](https://github.com/decred/dcrd).
 
 For brevity, unless otherwise noted we'll assume the image specified by the main Dockerfile has been created with the `dcrros:stable` tag. We'll also omit common options (such as `-P`, `--rm`) when discussing specific configuration alternatives.
 
