@@ -1,10 +1,10 @@
 // Copyright (c) 2013-2014 The btcsuite developers
-// Copyright (c) 2015-2018 The Decred developers
+// Copyright (c) 2015-2020 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
 // Package version provides a single location to house the version information
-// for dcrd and other utilities provided in the same repository.
+// for dcrros and other utilities provided in the same repository.
 package version
 
 import (
