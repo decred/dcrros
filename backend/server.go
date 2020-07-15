@@ -14,6 +14,7 @@ import (
 	"decred.org/dcrros/backend/backenddb"
 	"decred.org/dcrros/backend/internal/badgerdb"
 	"decred.org/dcrros/backend/internal/memdb"
+	"decred.org/dcrros/types"
 	"github.com/coinbase/rosetta-sdk-go/asserter"
 	rserver "github.com/coinbase/rosetta-sdk-go/server"
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
@@ -27,7 +28,7 @@ import (
 const (
 	// rosettaVersion is the version of the rosetta spec this backend
 	// currently implements.
-	rosettaVersion = "1.3.1"
+	rosettaVersion = "1.4.0"
 )
 
 type DBType string
@@ -90,7 +91,9 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		Network:    cfg.ChainParams.Name,
 	}
 
-	astr, err := asserter.NewServer([]*rtypes.NetworkIdentifier{network})
+	allTypes := types.AllOpTypes()
+	histBalance := true
+	astr, err := asserter.NewServer(allTypes, histBalance, []*rtypes.NetworkIdentifier{network})
 	if err != nil {
 		return nil, err
 	}

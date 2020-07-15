@@ -16,7 +16,7 @@ import (
 
 var _ rserver.MempoolAPIServicer = (*Server)(nil)
 
-func (s *Server) Mempool(ctx context.Context, req *rtypes.MempoolRequest) (*rtypes.MempoolResponse, *rtypes.Error) {
+func (s *Server) Mempool(ctx context.Context, req *rtypes.NetworkRequest) (*rtypes.MempoolResponse, *rtypes.Error) {
 	mempool, err := s.c.GetRawMempool(ctx, chainjson.GRMAll)
 	if err != nil {
 		return nil, types.DcrdError(err)

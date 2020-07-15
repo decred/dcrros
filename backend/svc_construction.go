@@ -18,6 +18,14 @@ import (
 
 var _ rserver.ConstructionAPIServicer = (*Server)(nil)
 
+func (s *Server) ConstructionDerive(context.Context, *rtypes.ConstructionDeriveRequest) (*rtypes.ConstructionDeriveResponse, *rtypes.Error) {
+	return nil, types.ErrUnimplemented.RError()
+}
+
+func (s *Server) ConstructionPreprocess(context.Context, *rtypes.ConstructionPreprocessRequest) (*rtypes.ConstructionPreprocessResponse, *rtypes.Error) {
+	return nil, types.ErrUnimplemented.RError()
+}
+
 // ConstructionMetadata returns metadata required to build a valid Decred
 // transaction.
 //
@@ -28,6 +36,22 @@ func (s *Server) ConstructionMetadata(context.Context, *rtypes.ConstructionMetad
 	return &rtypes.ConstructionMetadataResponse{
 		Metadata: map[string]interface{}{},
 	}, nil
+}
+
+func (s *Server) ConstructionPayloads(context.Context, *rtypes.ConstructionPayloadsRequest) (*rtypes.ConstructionPayloadsResponse, *rtypes.Error) {
+	return nil, types.ErrUnimplemented.RError()
+}
+
+func (s *Server) ConstructionParse(context.Context, *rtypes.ConstructionParseRequest) (*rtypes.ConstructionParseResponse, *rtypes.Error) {
+	return nil, types.ErrUnimplemented.RError()
+}
+
+func (s *Server) ConstructionCombine(context.Context, *rtypes.ConstructionCombineRequest) (*rtypes.ConstructionCombineResponse, *rtypes.Error) {
+	return nil, types.ErrUnimplemented.RError()
+}
+
+func (s *Server) ConstructionHash(context.Context, *rtypes.ConstructionHashRequest) (*rtypes.ConstructionHashResponse, *rtypes.Error) {
+	return nil, types.ErrUnimplemented.RError()
 }
 
 // ConstructionSubmit submits the provided transaction to the Decred network.
