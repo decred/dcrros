@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/blockchain/stake/v3"
@@ -34,6 +35,19 @@ func DcrAmountToRosetta(amt dcrutil.Amount) *rtypes.Amount {
 	}
 }
 
+func RosettaToDcrAmount(ramt *rtypes.Amount) (dcrutil.Amount, error) {
+	if ramt.Currency.Symbol != CurrencySymbol.Symbol {
+		return 0, fmt.Errorf("currency symbol does not match expected %s",
+			CurrencySymbol.Symbol)
+	}
+	if ramt.Currency.Decimals != CurrencySymbol.Decimals {
+		return 0, fmt.Errorf("currency decimals does not match expected %d",
+			CurrencySymbol.Decimals)
+	}
+	i, err := strconv.ParseInt(ramt.Value, 10, 64)
+	return dcrutil.Amount(i), err
+}
+
 // VoteBitsApprovesParent returns true if the provided voteBits as included in
 // some block header flags the parent block as approved according to current
 // consensus rules.
@@ -49,6 +63,25 @@ func rawPkScriptToAccountAddr(version uint16, pkScript []byte) string {
 	hex.Encode(addrBytes[2:6], versionBytes)
 	hex.Encode(addrBytes[6:], pkScript)
 	return string(addrBytes)
+}
+
+func rawAccountAddrToPkScript(version uint16, addr string) ([]byte, error) {
+	if len(addr) < 6 {
+		return nil, fmt.Errorf("raw address too small")
+	}
+	if !strings.HasPrefix(addr, "0x") {
+		return nil, fmt.Errorf("raw address does not have 0x prefix")
+	}
+	rawVersion, err := strconv.ParseInt(addr[2:6], 16, 16)
+	if err != nil || rawVersion < 0 {
+		return nil, fmt.Errorf("invalid version int: %v", err)
+	}
+	if uint16(rawVersion) != version {
+		return nil, fmt.Errorf("incorrect version %d (expected %d)", rawVersion,
+			version)
+	}
+
+	return hex.DecodeString(addr[6:])
 }
 
 func dcrPkScriptToAccountAddr(version uint16, pkScript []byte, chainParams *chaincfg.Params) (string, error) {
@@ -72,6 +105,24 @@ func dcrPkScriptToAccountAddr(version uint16, pkScript []byte, chainParams *chai
 
 	saddr := addrs[0].Address()
 	return saddr, nil
+}
+
+func rosettaAccountToPkScript(version uint16, account *rtypes.AccountIdentifier,
+	chainParams *chaincfg.Params) ([]byte, error) {
+
+	// Versions other than 0 aren't standardized yet, so account
+	// addresseses using that should be decoded using that version or with
+	// an 0x prefix need are raw pk scripts.
+	if version != 0 || strings.HasPrefix(account.Address, "0x") {
+		return rawAccountAddrToPkScript(version, account.Address)
+	}
+
+	addr, err := dcrutil.DecodeAddress(account.Address, chainParams)
+	if err != nil {
+		return nil, err
+	}
+
+	return txscript.PayToAddrScript(addr)
 }
 
 type PrevInput struct {
@@ -421,6 +472,7 @@ func MempoolTxToRosetta(tx *wire.MsgTx, fetchInputs PrevInputsFetcher, chainPara
 	}
 
 	op := Op{
+		Tx:     tx,
 		Tree:   tree,
 		Status: OpStatusSuccess,
 

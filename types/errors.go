@@ -7,6 +7,7 @@ package types
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/dcrjson/v3"
@@ -31,26 +32,48 @@ const (
 	ErrProcessingTx
 	ErrInvalidAccountIdAddr
 	ErrBlockIndexAfterTip
+	ErrUnsupportedCurveType
+	ErrInvalidSecp256k1PubKey
+	ErrNotCompressedSecp256k1Key
+	ErrUnspecifiedAddressVersion
+	ErrUnsupportedAddressVersion
+	ErrUnsupportedAddressAlgo
+	ErrUnkownOpType
+	ErrInvalidOp
+	ErrInvalidTxMetadata
+	ErrIncorrectSigCount
+	ErrUnsupportedSignatureType
 
 	// This MUST be the last member.
 	nbErrorCodes
 )
 
 var errorCodeMsgs = map[ErrorCode]string{
-	ErrUnknown:              "unknown error",
-	ErrRequestCanceled:      "request canceled",
-	ErrInvalidChainHash:     "invalid chain hash",
-	ErrInvalidArgument:      "invalid argument",
-	ErrBlockNotFound:        "block not found",
-	ErrTxNotFound:           "tx not found",
-	ErrUnimplemented:        "unimplemented",
-	ErrInvalidTransaction:   "invalid transaction",
-	ErrInvalidHexString:     "invalid hex string",
-	ErrAlreadyHaveTx:        "already have transaction",
-	ErrTxAlreadyMined:       "tx already mined",
-	ErrProcessingTx:         "error processing tx",
-	ErrInvalidAccountIdAddr: "invalid address in account identifier",
-	ErrBlockIndexAfterTip:   "block index after current mainchain tip",
+	ErrUnknown:                   "unknown error",
+	ErrRequestCanceled:           "request canceled",
+	ErrInvalidChainHash:          "invalid chain hash",
+	ErrInvalidArgument:           "invalid argument",
+	ErrBlockNotFound:             "block not found",
+	ErrTxNotFound:                "tx not found",
+	ErrUnimplemented:             "unimplemented",
+	ErrInvalidTransaction:        "invalid transaction",
+	ErrInvalidHexString:          "invalid hex string",
+	ErrAlreadyHaveTx:             "already have transaction",
+	ErrTxAlreadyMined:            "tx already mined",
+	ErrProcessingTx:              "error processing tx",
+	ErrInvalidAccountIdAddr:      "invalid address in account identifier",
+	ErrBlockIndexAfterTip:        "block index after current mainchain tip",
+	ErrUnsupportedCurveType:      "unsupported curve type",
+	ErrInvalidSecp256k1PubKey:    "invalid secp256k1 pubkey",
+	ErrNotCompressedSecp256k1Key: "secp256k1 pubkey is not in compressed format",
+	ErrUnspecifiedAddressVersion: "address version was not specified",
+	ErrUnsupportedAddressVersion: "unsupported address version",
+	ErrUnsupportedAddressAlgo:    "unsupported address algo",
+	ErrUnkownOpType:              "unknown op type",
+	ErrInvalidOp:                 "invalid op",
+	ErrInvalidTxMetadata:         "invalid tx metadata",
+	ErrIncorrectSigCount:         "incorrect signature count",
+	ErrUnsupportedSignatureType:  "unsupported signature type",
 }
 
 func (err ErrorCode) Error() string {
@@ -78,6 +101,10 @@ func (err ErrorCode) Retriable() Error {
 
 func (err ErrorCode) Msg(m string) Error {
 	return err.AsError().Msg(m)
+}
+
+func (err ErrorCode) Msgf(format string, args ...interface{}) Error {
+	return err.AsError().Msgf(format, args...)
 }
 
 func (err ErrorCode) RError() *rtypes.Error {
@@ -120,6 +147,14 @@ func (err Error) Msg(m string) Error {
 	return Error{
 		code:      err.code,
 		msg:       m,
+		retriable: err.retriable,
+	}
+}
+
+func (err Error) Msgf(format string, args ...interface{}) Error {
+	return Error{
+		code:      err.code,
+		msg:       fmt.Sprintf(format, args...),
 		retriable: err.retriable,
 	}
 }
