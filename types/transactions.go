@@ -106,8 +106,6 @@ func metadataChainHash(m map[string]interface{}, k string, h *chainhash.Hash) er
 	default:
 		return fmt.Errorf("unconvertable type %T to chainhash.Hash", v)
 	}
-
-	return nil
 }
 
 func metadataHex(m map[string]interface{}, k string, b *[]byte) error {
@@ -257,8 +255,8 @@ func extractInputSignPayload(op *rtypes.Operation, tx *wire.MsgTx, idx int, chai
 	case *dcrutil.AddressPubKeyHash:
 		sigType = rtypes.Ecdsa
 	default:
-		// Other unkown address types are not an error, they just don't
-		// produce a signing payload we know of.
+		// Other unknown address types are not an error, they just
+		// don't produce a signing payload we know of.
 		return nil, nil
 	}
 

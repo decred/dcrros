@@ -197,7 +197,7 @@ func (s *Server) onDcrdBlockConnected(blockHeader []byte, transactions [][]byte)
 	s.notifyNewBlockEvent()
 }
 
-// rollbackDbChain rolls back the db chain until we find a common block betwen
+// rollbackDbChain rolls back the db chain until we find a common block between
 // the db and the blockchain, assuming the chain is at the specified target
 // hash and height.
 //

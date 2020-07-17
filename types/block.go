@@ -174,7 +174,7 @@ func (op *Op) ROp() *rtypes.Operation {
 
 	return &rtypes.Operation{
 		OperationIdentifier: &rtypes.OperationIdentifier{
-			Index: int64(op.OpIndex),
+			Index: op.OpIndex,
 		},
 		Type:     op.Type.RType(),
 		Status:   string(op.Status),

@@ -69,7 +69,6 @@ const (
 	defaultConfigFilename = "dcrros.conf"
 	defaultLogLevel       = "info"
 	defaultActiveNet      = cnMainNet
-	defaultBindAddr       = ":8088"
 	defaultDBType         = backend.DBTypeBadger
 	defaultDataDirname    = "data"
 	defaultLogDirname     = "logs"
@@ -186,9 +185,7 @@ func (c *config) dcrdArgs() []string {
 		args = append(args, "--simnet")
 	}
 
-	for _, extra := range c.DcrdExtraArgs {
-		args = append(args, extra)
-	}
+	args = append(args, c.DcrdExtraArgs...)
 
 	return args
 }

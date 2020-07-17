@@ -71,7 +71,7 @@ func (s *Server) inputsFetcher(ctx context.Context, utxoSet map[wire.OutPoint]*t
 			continue
 		}
 		if len(tx.TxOut) <= int(in.Index) {
-			return nil, fmt.Errorf("non-existant output index %s", in.String())
+			return nil, fmt.Errorf("non-existent output index %s", in.String())
 		}
 		out := tx.TxOut[in.Index]
 		res[*in] = &types.PrevInput{

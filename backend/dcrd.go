@@ -133,7 +133,7 @@ func (s *Server) waitForBlockchainSync(ctx context.Context) error {
 			return nil
 		}
 
-		if time.Now().Sub(lastLogTime) > time.Minute {
+		if time.Since(lastLogTime) > time.Minute {
 			svrLog.Infof("Waiting blockchain sync (IBD=%v progress %.2f%%)",
 				info.InitialBlockDownload, info.VerificationProgress*100)
 			lastLogTime = time.Now()

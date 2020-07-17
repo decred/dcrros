@@ -225,9 +225,7 @@ func _main() error {
 	}
 
 	// Wait until the app is commanded to shutdown to close the server.
-	select {
-	case <-ctx.Done():
-	}
+	<-ctx.Done()
 
 	// Wait up to 5 seconds until all connections are gracefully closed
 	// before terminating the process.
