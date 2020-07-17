@@ -277,14 +277,14 @@ func (s *Server) ConstructionSubmit(ctx context.Context,
 			if rpcerr.Code == dcrjson.ErrRPCDuplicateTx {
 				return nil, types.ErrAlreadyHaveTx.Msg(err.Error()).RError()
 
-			} else if rpcerr.Code == dcrjson.ErrRPCMisc && strings.Index(rpcerr.Error(), "transaction already exists") > 0 {
+			} else if rpcerr.Code == dcrjson.ErrRPCMisc && strings.Contains(rpcerr.Error(), "transaction already exists") {
 				return nil, types.ErrTxAlreadyMined.Msg(err.Error()).RError()
 			} else if rpcerr.Code == dcrjson.ErrRPCMisc {
 				// Generic rule error.
 				return nil, types.ErrProcessingTx.Msg(err.Error()).RError()
 			}
 
-			return nil, types.DcrdError(err)
+			return nil, types.RError(err)
 		}
 	}
 

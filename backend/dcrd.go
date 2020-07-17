@@ -200,7 +200,6 @@ func (s *Server) getBlock(ctx context.Context, bh *chainhash.Hash) (*wire.MsgBlo
 		return nil, types.ErrBlockNotFound
 	}
 
-	// TODO: types.DcrdError()
 	return nil, err
 }
 

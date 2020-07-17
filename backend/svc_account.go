@@ -201,7 +201,7 @@ func (s *Server) AccountBalance(ctx context.Context, req *rtypes.AccountBalanceR
 	// current block height.
 	stopHash, stopHeight, _, err := s.getBlockByPartialId(ctx, req.BlockIdentifier)
 	if err != nil {
-		return nil, types.DcrdError(err)
+		return nil, types.RError(err)
 	}
 
 	// Track the balance across batches of txs.
@@ -213,7 +213,7 @@ func (s *Server) AccountBalance(ctx context.Context, req *rtypes.AccountBalanceR
 		return err
 	})
 	if err != nil {
-		return nil, types.DcrdError(err)
+		return nil, types.RError(err)
 	}
 
 	res := &rtypes.AccountBalanceResponse{

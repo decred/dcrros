@@ -10,10 +10,20 @@ import (
 	"fmt"
 
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
-	"github.com/decred/dcrd/dcrjson/v3"
 )
 
+// ErrorCode represents the numerical error Code returned on a Rosetta Error
+// structure.
+//
+// It implements the standard Go error interface and the RosettaError interface
+// and has full support for errors.Is and errors.As functions.
 type ErrorCode int32
+
+// RosettaError is an interface that defines types that can convert themselves
+// into a Rosetta Error response structure.
+type RosettaError interface {
+	RError() *rtypes.Error
+}
 
 const (
 	// NOTE: after adding a new type, also modify errCodeMsgs.
@@ -48,6 +58,8 @@ const (
 	nbErrorCodes
 )
 
+// errorCodeMsgs are the default error message strings for the corresponding
+// predefined error codes.
 var errorCodeMsgs = map[ErrorCode]string{
 	ErrUnknown:                   "unknown error",
 	ErrRequestCanceled:           "request canceled",
@@ -76,65 +88,115 @@ var errorCodeMsgs = map[ErrorCode]string{
 	ErrUnsupportedSignatureType:  "unsupported signature type",
 }
 
+// Error returns the default error message for the given error code.
+//
+// NOTE: this is part of the standard Go error interface.
 func (err ErrorCode) Error() string {
 	return errorCodeMsgs[err]
 }
 
+// Is returns true if the target error is also an error code, an Error value
+// with the same error code as err or a RosettaError with the same Code as this
+// err.
 func (err ErrorCode) Is(target error) bool {
-	if target, ok := target.(ErrorCode); ok {
+	switch target := target.(type) {
+	case ErrorCode:
 		return target == err
+
+	case Error:
+		return target.code == err
+
+	case RosettaError:
+		rerr := target.RError()
+		if rerr != nil {
+			return ErrorCode(rerr.Code) == err
+		}
 	}
 
 	return false
 }
 
+// AsError converts this ErrorCode into an Error with the default message.
 func (err ErrorCode) AsError() Error {
 	return Error{
 		code: err,
-		msg:  errorCodeMsgs[err],
 	}
 }
 
+// Retriable returns a new Error with this ErrorCode and default message and
+// the Retriable flag set.
 func (err ErrorCode) Retriable() Error {
 	return err.AsError().Retriable()
 }
 
+// Msg returns a new Error with this ErrorCode and the given message as error
+// message.
 func (err ErrorCode) Msg(m string) Error {
 	return err.AsError().Msg(m)
 }
 
+// Msgf returns a new Error with this ErrorCode and the given formatted message
+// as error message.
 func (err ErrorCode) Msgf(format string, args ...interface{}) Error {
 	return err.AsError().Msgf(format, args...)
 }
 
+// RError returns a Rosetta error with this error code and default error
+// message.
+//
+// This is is part of the RosettaError interface.
 func (err ErrorCode) RError() *rtypes.Error {
 	return err.AsError().RError()
 }
 
+// Error is a fully specified error structure that is convertible to a Rosetta
+// Error value and also fulfills Go's standard error interface.
 type Error struct {
 	code      ErrorCode
 	msg       string
 	retriable bool
 }
 
+// Error returns the stored error message.
+//
+// NOTE: this is part of Go's standard error interface.
 func (err Error) Error() string {
-	return err.msg
+	if err.msg != "" {
+		return err.msg
+	}
+	return errorCodeMsgs[err.code]
 }
 
+// Is returns true if the target is either an ErrorCode with the same code as
+// this error, an Error with the same code as this error or a
+// RosettaError-implementing value with the same code as this error.
 func (err Error) Is(target error) bool {
 	switch target := target.(type) {
-	case Error:
-		return target.code == err.code
 	case ErrorCode:
 		return target == err.code
+
+	case Error:
+		return target.code == err.code
+
+	case RosettaError:
+		rerr := target.RError()
+		if rerr != nil {
+			return ErrorCode(rerr.Code) == err.code
+		}
 	}
+
 	return false
 }
 
+// Unwrap returns the error code as the underlying error.
+//
+// This makes the Error function usable by the stdlib's As routine.
 func (err Error) Unwrap() error {
 	return err.code
 }
 
+// Retriable returns a new Error equal to err but with the retriable flag set
+// to true.
 func (err Error) Retriable() Error {
 	return Error{
 		code:      err.code,
@@ -143,6 +205,7 @@ func (err Error) Retriable() Error {
 	}
 }
 
+// Msg returns a new Error equal to err but with the specified error message.
 func (err Error) Msg(m string) Error {
 	return Error{
 		code:      err.code,
@@ -151,6 +214,8 @@ func (err Error) Msg(m string) Error {
 	}
 }
 
+// Msgf returns a new Error equal to err but with the specified formatted
+// string as error message.
 func (err Error) Msgf(format string, args ...interface{}) Error {
 	return Error{
 		code:      err.code,
@@ -159,11 +224,21 @@ func (err Error) Msgf(format string, args ...interface{}) Error {
 	}
 }
 
+// RError returns the error as a Rosetta Error value.
+//
+// NOTE: this is part of the RosettaError interface.
 func (err Error) RError() *rtypes.Error {
+	var details map[string]interface{}
+	if err.msg != "" {
+		details = make(map[string]interface{}, 1)
+		details["error"] = err.msg
+	}
+
 	return &rtypes.Error{
 		Code:      int32(err.code),
-		Message:   err.msg,
+		Message:   errorCodeMsgs[err.code],
 		Retriable: err.retriable,
+		Details:   details,
 	}
 }
 
@@ -177,51 +252,47 @@ func AllErrors() []*rtypes.Error {
 	return errs
 }
 
-type ErrorOption struct {
-	f func(orig error, err *rtypes.Error)
-}
+// RError is a helper function that can convert any standard Go error into a
+// Rosetta Error value.
+//
+// ErrorCode and Error values from this package as well as values that
+// implement the RosettaError interface are converted directly. Errors that can
+// be unwrapped into an Error or ErrorCode value are also handled
+// appropriately.
+//
+// A special case is also made for errors from the context package. The
+// context.Canceled and context.DeadlineExceeded errors are converted to
+// ErrRequestCanceled.
+//
+// Other errors are converted to a Rosetta Error with error type ErrUnknown.
+func RError(err error) *rtypes.Error {
+	switch err := err.(type) {
+	case ErrorCode:
+		return err.RError()
 
-func MapRpcErrCode(rpcErrCode dcrjson.RPCErrorCode, rosettaErrCode ErrorCode) ErrorOption {
-	return ErrorOption{
-		f: func(orig error, err *rtypes.Error) {
-			if rpcerr, ok := orig.(*dcrjson.RPCError); ok && rpcerr.Code == rpcErrCode {
-				err.Code = int32(rosettaErrCode)
-			}
-		},
-	}
-}
+	case Error:
+		return err.RError()
 
-// DcrdError converts errors received as a result of a dcrd rpc client call to
-// an appropriate rosetta error struct.
-func DcrdError(err error, opts ...ErrorOption) *rtypes.Error {
-	e := &rtypes.Error{
-		Message: err.Error(),
-
-		// By default all dcrd errors are retriable.
-		Retriable: true,
+	case RosettaError:
+		if err != nil {
+			return err.RError()
+		}
 	}
 
 	switch {
-	case errors.Is(err, context.Canceled),
-		errors.Is(err, context.DeadlineExceeded):
-
-		e.Code = int32(ErrRequestCanceled)
+	case err == context.Canceled || err == context.DeadlineExceeded:
+		return ErrRequestCanceled.RError()
 	}
 
-	for _, opt := range opts {
-		opt.f(err, e)
-	}
-
-	return e
-}
-
-func RError(err error) *rtypes.Error {
 	var e Error
 	if errors.As(err, &e) {
 		return e.RError()
 	}
 
-	return &rtypes.Error{
-		Message: err.Error(),
+	var ec ErrorCode
+	if errors.As(err, &ec) {
+		return ec.RError()
 	}
+
+	return ErrUnknown.Msg(err.Error()).RError()
 }

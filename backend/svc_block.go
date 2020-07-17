@@ -13,6 +13,7 @@ import (
 	rserver "github.com/coinbase/rosetta-sdk-go/server"
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
+	"github.com/decred/dcrd/dcrjson/v3"
 	"github.com/decred/dcrd/dcrutil/v3"
 	"github.com/decred/dcrd/wire"
 	"golang.org/x/sync/errgroup"
@@ -97,7 +98,7 @@ func (s *Server) makeInputsFetcher(ctx context.Context, utxoSet map[wire.OutPoin
 func (s *Server) Block(ctx context.Context, req *rtypes.BlockRequest) (*rtypes.BlockResponse, *rtypes.Error) {
 	_, _, b, err := s.getBlockByPartialId(ctx, req.BlockIdentifier)
 	if err != nil {
-		return nil, types.DcrdError(err)
+		return nil, types.RError(err)
 	}
 	var prev *wire.MsgBlock
 
@@ -108,8 +109,12 @@ func (s *Server) Block(ctx context.Context, req *rtypes.BlockRequest) (*rtypes.B
 	approvesParent := b.Header.VoteBits&0x01 == 0x01
 	if !approvesParent && b.Header.Height > 0 {
 		prev, err = s.c.GetBlock(ctx, &b.Header.PrevBlock)
+		if rpcerr, ok := err.(*dcrjson.RPCError); ok && rpcerr.Code == dcrjson.ErrRPCBlockNotFound {
+			return nil, types.ErrBlockNotFound.RError()
+		}
+
 		if err != nil {
-			return nil, types.DcrdError(err, types.MapRpcErrCode(-5, types.ErrBlockNotFound))
+			return nil, types.RError(err)
 		}
 	}
 

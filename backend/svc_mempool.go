@@ -11,6 +11,7 @@ import (
 	rserver "github.com/coinbase/rosetta-sdk-go/server"
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
+	"github.com/decred/dcrd/dcrjson/v3"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 )
 
@@ -19,7 +20,7 @@ var _ rserver.MempoolAPIServicer = (*Server)(nil)
 func (s *Server) Mempool(ctx context.Context, req *rtypes.NetworkRequest) (*rtypes.MempoolResponse, *rtypes.Error) {
 	mempool, err := s.c.GetRawMempool(ctx, chainjson.GRMAll)
 	if err != nil {
-		return nil, types.DcrdError(err)
+		return nil, types.RError(err)
 	}
 	txs := make([]*rtypes.TransactionIdentifier, len(mempool))
 	for i, txh := range mempool {
@@ -41,8 +42,11 @@ func (s *Server) MempoolTransaction(ctx context.Context, req *rtypes.MempoolTran
 	}
 
 	tx, err := s.c.GetRawTransaction(ctx, &txh)
+	if rpcerr, ok := err.(*dcrjson.RPCError); ok && rpcerr.Code == dcrjson.ErrRPCNoTxInfo {
+		return nil, types.ErrTxNotFound.RError()
+	}
 	if err != nil {
-		return nil, types.DcrdError(err)
+		return nil, types.RError(err)
 	}
 
 	// TODO: What if the returned tx has already been mined?

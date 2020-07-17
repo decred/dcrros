@@ -73,7 +73,7 @@ func (s *Server) NetworkStatus(ctx context.Context, req *rtypes.NetworkRequest) 
 	// then the block.
 	hash, height, block, err := s.bestBlock(ctx)
 	if err != nil {
-		return nil, types.DcrdError(err)
+		return nil, types.RError(err)
 	}
 
 	// Rosetta timestamp is in milliseconds.
