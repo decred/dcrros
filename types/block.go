@@ -5,124 +5,27 @@
 package types
 
 import (
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/blockchain/stake/v3"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrutil/v3"
-	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
 )
 
 var (
+	// ErrNeedsPreviousBlock indicates the previous block is needed but was
+	// not provided.
 	ErrNeedsPreviousBlock = errors.New("previous block required")
-
-	CurrencySymbol = &rtypes.Currency{
-		Symbol:   "DCR",
-		Decimals: 8,
-	}
 )
-
-func DcrAmountToRosetta(amt dcrutil.Amount) *rtypes.Amount {
-	return &rtypes.Amount{
-		Value:    strconv.FormatInt(int64(amt), 10),
-		Currency: CurrencySymbol,
-	}
-}
-
-func RosettaToDcrAmount(ramt *rtypes.Amount) (dcrutil.Amount, error) {
-	if ramt.Currency.Symbol != CurrencySymbol.Symbol {
-		return 0, fmt.Errorf("currency symbol does not match expected %s",
-			CurrencySymbol.Symbol)
-	}
-	if ramt.Currency.Decimals != CurrencySymbol.Decimals {
-		return 0, fmt.Errorf("currency decimals does not match expected %d",
-			CurrencySymbol.Decimals)
-	}
-	i, err := strconv.ParseInt(ramt.Value, 10, 64)
-	return dcrutil.Amount(i), err
-}
 
 // VoteBitsApprovesParent returns true if the provided voteBits as included in
 // some block header flags the parent block as approved according to current
 // consensus rules.
 func VoteBitsApprovesParent(voteBits uint16) bool {
 	return voteBits&0x01 == 0x01
-}
-
-func rawPkScriptToAccountAddr(version uint16, pkScript []byte) string {
-	addrBytes := make([]byte, 2+2*2+2*len(pkScript))
-	addrBytes[0] = 0x30 // "0"
-	addrBytes[1] = 0x78 // "x"
-	versionBytes := []byte{byte(version >> 8), byte(version)}
-	hex.Encode(addrBytes[2:6], versionBytes)
-	hex.Encode(addrBytes[6:], pkScript)
-	return string(addrBytes)
-}
-
-func rawAccountAddrToPkScript(version uint16, addr string) ([]byte, error) {
-	if len(addr) < 6 {
-		return nil, fmt.Errorf("raw address too small")
-	}
-	if !strings.HasPrefix(addr, "0x") {
-		return nil, fmt.Errorf("raw address does not have 0x prefix")
-	}
-	rawVersion, err := strconv.ParseInt(addr[2:6], 16, 16)
-	if err != nil || rawVersion < 0 {
-		return nil, fmt.Errorf("invalid version int: %v", err)
-	}
-	if uint16(rawVersion) != version {
-		return nil, fmt.Errorf("incorrect version %d (expected %d)", rawVersion,
-			version)
-	}
-
-	return hex.DecodeString(addr[6:])
-}
-
-func dcrPkScriptToAccountAddr(version uint16, pkScript []byte, chainParams *chaincfg.Params) (string, error) {
-	if version != 0 {
-		// Versions other than 0 aren't standardized yet, so return as
-		// a raw hex string with a "0x" prefix.
-		return rawPkScriptToAccountAddr(version, pkScript), nil
-	}
-
-	_, addrs, _, err := txscript.ExtractPkScriptAddrs(version, pkScript, chainParams)
-	if err != nil {
-		// Currently the only possible error is due to version != 0,
-		// which is handled above, but err on the side of caution.
-		return "", err
-	}
-
-	if len(addrs) != 1 {
-		// TODO: support 'bare' (non-p2sh) multisig?
-		return rawPkScriptToAccountAddr(version, pkScript), nil
-	}
-
-	saddr := addrs[0].Address()
-	return saddr, nil
-}
-
-func rosettaAccountToPkScript(version uint16, account *rtypes.AccountIdentifier,
-	chainParams *chaincfg.Params) ([]byte, error) {
-
-	// Versions other than 0 aren't standardized yet, so account
-	// addresseses using that should be decoded using that version or with
-	// an 0x prefix need are raw pk scripts.
-	if version != 0 || strings.HasPrefix(account.Address, "0x") {
-		return rawAccountAddrToPkScript(version, account.Address)
-	}
-
-	addr, err := dcrutil.DecodeAddress(account.Address, chainParams)
-	if err != nil {
-		return nil, err
-	}
-
-	return txscript.PayToAddrScript(addr)
 }
 
 type PrevInput struct {
