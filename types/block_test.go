@@ -661,3 +661,39 @@ func TestBlockToRosetta(t *testing.T) {
 		}
 	})
 }
+
+// TestMempoolTxToRosetta tests that converting a mempool tx to a Rosetta
+// transaction works.
+func TestMempoolTxToRosetta(t *testing.T) {
+	regular := wire.TxTreeRegular
+	tctx := txToRosettaTestCases()
+
+	for tci, tc := range tctx.testCases {
+		// Mempool only returns successful ops so no point in trying
+		// test cases that expect a reversed tx.
+		if tc.status != OpStatusSuccess {
+			continue
+		}
+
+		// Skip coinbase since it's never found in the mempool.
+		if tc.tree == regular && tc.txIndex == 0 {
+			continue
+		}
+
+		tc := tc
+		tci := tci
+		ok := t.Run(tc.name, func(t *testing.T) {
+			tx, err := MempoolTxToRosetta(tc.tx, tctx.fetchInputs,
+				tctx.chainParams)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			// Verify the transaction data matches the expected.
+			assertTestCaseTxMatches(t, tc.status, 0, tci, tx, tc)
+		})
+		if !ok {
+			break
+		}
+	}
+}
