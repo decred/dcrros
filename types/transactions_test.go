@@ -7,6 +7,8 @@ import (
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
+	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -317,5 +319,81 @@ func TestExtractTxSigners(t *testing.T) {
 			t.Fatalf("wrong order of signers at idx %d. want=%s got=%s",
 				i, wantSigners[i], signers[i])
 		}
+	}
+}
+
+// TestExtractSignPayloads tests that we can extract the correct signature
+// payloads for a given list of Rosetta operations.
+func TestExtractSignPayloads(t *testing.T) {
+	tctx := rosToTxTestCases()
+	chainParams := chaincfg.RegNetParams()
+
+	txMeta := map[string]interface{}{
+		"version":  uint16(0),
+		"expiry":   uint32(0),
+		"locktime": uint32(0),
+	}
+
+	// We use RosettaOpsToTx in this test since we only expect to extract
+	// signing payloads from txs constructed by this function.
+	tx, err := RosettaOpsToTx(txMeta, tctx.ops(), chainParams)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	payloads, err := ExtractSignPayloads(tctx.ops(), tx, chainParams)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var pidx int
+	var inIdx int
+	for tci, tc := range tctx.testCases {
+		// Only debits (i.e. inputs) generate a signing payload.
+		if tc.op.Type != "debit" {
+			continue
+		}
+
+		// Skip if this isn't supposed to be signed.
+		if tc.signer == "" {
+			continue
+		}
+
+		addr, _ := dcrutil.DecodeAddress(tc.op.Account.Address, chainParams)
+		if _, ok := addr.(*dcrutil.AddressPubKeyHash); !ok {
+			// Anything other than an AddresPubKeyHash (including
+			// decoding errors) doesn't currently generate a
+			// signing payload.
+			inIdx++
+			continue
+		}
+		sigType := rtypes.Ecdsa
+
+		pkScript, _ := txscript.PayToAddrScript(addr)
+		sigHash, _ := txscript.CalcSignatureHash(pkScript, sigHashType,
+			tx, inIdx, nil)
+
+		if pidx >= len(payloads) {
+			t.Fatalf("tc %d unexpected nb of payloads. want=%d "+
+				"got=%d", tci, pidx+1, len(payloads))
+		}
+
+		pay := payloads[pidx]
+		if pay.Address != addr.Address() {
+			t.Fatalf("tc %d unexpected address. want=%s got=%s",
+				tci, addr.Address(), pay.Address)
+		}
+
+		if !bytes.Equal(pay.Bytes, sigHash) {
+			t.Fatalf("tc %d unexpected bytes. want=%x got=%x",
+				tci, sigHash, pay.Bytes)
+		}
+
+		if pay.SignatureType != sigType {
+			t.Fatalf("tc %d unexpected sigType. want=%s got=%s",
+				tci, sigType, pay.SignatureType)
+		}
+		pidx++
+		inIdx++
 	}
 }
