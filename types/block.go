@@ -28,12 +28,14 @@ func VoteBitsApprovesParent(voteBits uint16) bool {
 	return voteBits&0x01 == 0x01
 }
 
+// PrevInput is the output information needed for a given transaction input.
 type PrevInput struct {
 	PkScript []byte
 	Version  uint16
 	Amount   dcrutil.Amount
 }
 
+// PrevInputsFetcher is used to fetch previous inputs from transactions.
 type PrevInputsFetcher func(...*wire.OutPoint) (map[wire.OutPoint]*PrevInput, error)
 
 type Op struct {
@@ -90,7 +92,21 @@ func (op *Op) ROp() *rtypes.Operation {
 
 type BlockOpCb = func(op *Op) error
 
-func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpCb, chainParams *chaincfg.Params) error {
+// iterateBlockOpsInTx iterates over all Rosetta-reprenstable operations in the
+// given transaction.
+//
+// The provided op must have been previously filled with the following
+// information:
+// - Tree
+// - Tx
+// - TxIndex
+// - OpIndex
+// - Status
+//
+// The same op is reused across all calls to the callback.
+func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpCb,
+	chainParams *chaincfg.Params) error {
+
 	tx := op.Tx
 	isVote := op.Tree == wire.TxTreeStake && stake.IsSSGen(tx)
 	isCoinbase := op.Tree == wire.TxTreeRegular && op.TxIndex == 0
@@ -113,11 +129,11 @@ func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpC
 
 	var ok bool
 
-	// Reset op's output attributes.
-	op.Out = nil
-
 	// Helper to process the inputs.
 	addTxIns := func() error {
+		// Reset op's output attributes.
+		op.Out = nil
+
 		for i, in := range tx.TxIn {
 			if i == 0 && (isVote || isCoinbase) {
 				// Coinbases don't have an input with i > 0.
@@ -160,12 +176,12 @@ func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpC
 		return nil
 	}
 
-	// Reset op's input attributes.
-	op.In = nil
-	op.PrevInput = nil
-
 	// Helper to process the outputs.
 	addTxOuts := func() error {
+		// Reset op's input attributes.
+		op.In = nil
+		op.PrevInput = nil
+
 		for i, out := range tx.TxOut {
 			if out.Value == 0 {
 				// Ignore OP_RETURNs and other zero-valued
@@ -226,7 +242,20 @@ func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpC
 	return nil
 }
 
-func IterateBlockOps(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher, applyOp BlockOpCb, chainParams *chaincfg.Params) error {
+// IterateBlockOps generates all Rosetta-understandable operations for the
+// given block. It does so by iterating over every transaction and calling the
+// applyOp callback on every transaction input and output.
+//
+// prev is only needed if block disapproves its parent block, in which case
+// transactions in prev are reversed.
+//
+// fetchInputs must be able to fetch any previous output from the blocks.
+//
+// The operation passed to applyOp may be reused, so callers are expected to
+// copy its contents if they will ne needed.
+func IterateBlockOps(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher,
+	applyOp BlockOpCb, chainParams *chaincfg.Params) error {
+
 	approvesParent := VoteBitsApprovesParent(b.Header.VoteBits) || b.Header.Height == 0
 	if !approvesParent && prev == nil {
 		return ErrNeedsPreviousBlock
