@@ -180,6 +180,10 @@ func rosettaOpToTx(op *rtypes.Operation, tx *wire.MsgTx, chainParams *chaincfg.P
 			return fmt.Errorf("unable to decode script_version: %v", err)
 		}
 
+		if op.Account == nil {
+			return fmt.Errorf("nil account")
+		}
+
 		var err error
 		out.PkScript, err = rosettaAccountToPkScript(out.Version,
 			op.Account, chainParams)
