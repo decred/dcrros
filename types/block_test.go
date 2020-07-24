@@ -4,14 +4,32 @@ import (
 	"math"
 	"testing"
 
+	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/wire"
 )
 
-func TestTxToBlockOps(t *testing.T) {
+type txToRosettaTestCase struct {
+	name    string
+	tree    int8
+	txIndex int
+	status  OpStatus
+	tx      *wire.MsgTx
+	ops     []Op
+}
+
+type txToRosettaTestCtx struct {
+	testCases   []*txToRosettaTestCase
+	chainParams *chaincfg.Params
+	fetchInputs PrevInputsFetcher
+}
+
+// txToRosettaTestCases builds a set of test cases for converting decred
+// transactions to a list of Rosetta transacitons.
+func txToRosettaTestCases() *txToRosettaTestCtx {
+	chainParams := chaincfg.RegNetParams()
 	regular := wire.TxTreeRegular
 	stake := wire.TxTreeStake
-	chainParams := chaincfg.RegNetParams()
 
 	// P2PKH address.
 	pks1 := mustHex("76a914a5a7f924934685fbca3008c9524dae1cea9f9d3488ac")
@@ -101,42 +119,11 @@ func TestTxToBlockOps(t *testing.T) {
 	// Each test case lists the op values that need to be configured prior
 	// to calling iterateBlockOpsInTx, the Decred tx and the expected
 	// resulting list of Rosetta operations.
-	tests := []struct {
-		name    string
-		tree    int8
-		txIndex int
-		status  OpStatus
-		tx      *wire.MsgTx
-		ops     []Op
-	}{{
-		name:    "coinbase with treasury output",
-		tree:    regular,
-		txIndex: 0,
-		status:  OpStatusSuccess,
-		tx: &wire.MsgTx{
-			TxIn: []*wire.TxIn{
-				{}, // Coinbase
-			},
-			TxOut: []*wire.TxOut{
-				txOut1, // Treasury
-				{},     // OP_RETURN
-				txOut2, // PoW reward
-			},
-		},
-		ops: []Op{{ // Treasury
-			Type:    OpTypeCredit,
-			IOIndex: 0,
-			Out:     txOut1,
-			Account: addr1,
-			Amount:  1,
-		}, { // PoW reward
-			Type:    OpTypeCredit,
-			IOIndex: 2,
-			Out:     txOut2,
-			Account: addr2,
-			Amount:  2,
-		}},
-	}, {
+	//
+	// The order of these test cases is with all tests that are reversed
+	// first so that block tests can easily test both approved and
+	// disapproved blocks.
+	testCases := []*txToRosettaTestCase{{
 		name:    "reversed coinbase with treasury output",
 		tree:    regular,
 		txIndex: 0,
@@ -205,6 +192,34 @@ func TestTxToBlockOps(t *testing.T) {
 			Amount:  2,
 		}},
 	}, {
+		name:    "coinbase with treasury output",
+		tree:    regular,
+		txIndex: 0,
+		status:  OpStatusSuccess,
+		tx: &wire.MsgTx{
+			TxIn: []*wire.TxIn{
+				{}, // Coinbase
+			},
+			TxOut: []*wire.TxOut{
+				txOut1, // Treasury
+				{},     // OP_RETURN
+				txOut2, // PoW reward
+			},
+		},
+		ops: []Op{{ // Treasury
+			Type:    OpTypeCredit,
+			IOIndex: 0,
+			Out:     txOut1,
+			Account: addr1,
+			Amount:  1,
+		}, { // PoW reward
+			Type:    OpTypeCredit,
+			IOIndex: 2,
+			Out:     txOut2,
+			Account: addr2,
+			Amount:  2,
+		}},
+	}, {
 		name:    "standard regular tx",
 		tree:    regular,
 		txIndex: 1,
@@ -247,7 +262,7 @@ func TestTxToBlockOps(t *testing.T) {
 	}, {
 		name:    "ticket with 2 commitments",
 		tree:    stake,
-		txIndex: 1,
+		txIndex: 0,
 		status:  OpStatusSuccess,
 		tx: &wire.MsgTx{
 			TxIn: []*wire.TxIn{
@@ -332,7 +347,7 @@ func TestTxToBlockOps(t *testing.T) {
 	}, {
 		name:    "revocation with 2 returns",
 		tree:    stake,
-		txIndex: 1,
+		txIndex: 2,
 		status:  OpStatusSuccess,
 		tx: &wire.MsgTx{
 			TxIn: []*wire.TxIn{
@@ -364,7 +379,69 @@ func TestTxToBlockOps(t *testing.T) {
 		}},
 	}}
 
-	for _, tc := range tests {
+	return &txToRosettaTestCtx{
+		testCases:   testCases,
+		chainParams: chainParams,
+		fetchInputs: fetchInputs,
+	}
+}
+
+// assertTestCaseOpsMatch asserts that the given operation matches the
+// operation opi of the given test case.
+func assertTestCaseOpsMatch(t *testing.T, txi, opi int, status OpStatus,
+	op *rtypes.Operation, tc *txToRosettaTestCase) {
+
+	// OperationIndentifier.Index must be monotonically
+	// increasing (i.e. it matches the index in the slice).
+	if op.OperationIdentifier.Index != int64(opi) {
+		t.Fatalf("tx %d op %d: unexpected OpId.Index. "+
+			"want=%d got=%d", txi, opi,
+			opi, op.OperationIdentifier.Index)
+	}
+
+	// All operations should have the appropriate status.
+	if OpStatus(op.Status) != status {
+		t.Fatalf("tx %d op %d: unexpected OpStatus. "+
+			"want=%s got=%s", txi, opi,
+			OpStatusSuccess, op.Status)
+	}
+
+	// Verify key properties between test case and
+	// transaction.
+
+	// Amount.
+	opAmt, err := RosettaToDcrAmount(op.Amount)
+	if err != nil {
+		t.Fatalf("unexpected conversion error: %v", err)
+	}
+	if opAmt != tc.ops[opi].Amount {
+		t.Fatalf("tx %d op %d unexpected amount. want=%d "+
+			"got=%d", txi, opi, tc.ops[opi].Amount,
+			opAmt)
+	}
+
+	// Account Address.
+	if op.Account.Address != tc.ops[opi].Account {
+		t.Fatalf("tx %d op %d unexpected account. want=%s "+
+			"got=%s", txi, opi, tc.ops[opi].Account,
+			op.Account.Address)
+	}
+
+	// OpType.
+	if OpType(op.Type) != tc.ops[opi].Type {
+		t.Fatalf("tx %d op %d unexpected OpType. want=%s "+
+			"got=%s", txi, opi, tc.ops[opi].Type,
+			op.Type)
+	}
+}
+
+// TestTxToBlockOps tests that converting a list a transaction to a list of
+// Rosetta ops works as intended.
+func TestTxToBlockOps(t *testing.T) {
+
+	tests := txToRosettaTestCases()
+
+	for _, tc := range tests.testCases {
 		tc := tc
 		ok := t.Run(tc.name, func(t *testing.T) {
 			op := &Op{
@@ -432,11 +509,17 @@ func TestTxToBlockOps(t *testing.T) {
 					}
 				*/
 
+				// Also test that the op converted to a Rosetta
+				// structure has the key information set.
+				assertTestCaseOpsMatch(t, 0, opIdx, tc.status,
+					op.ROp(), tc)
+
 				opIdx++
 				return nil
 			}
 
-			err := iterateBlockOpsInTx(op, fetchInputs, applyOp, chainParams)
+			err := iterateBlockOpsInTx(op, tests.fetchInputs,
+				applyOp, tests.chainParams)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -452,4 +535,129 @@ func TestTxToBlockOps(t *testing.T) {
 		}
 	}
 
+}
+
+// assertTestCaseTxMatches asserts that the given Rosetta transaction matches
+// what was expected for a given test case.
+func assertTestCaseTxMatches(t *testing.T, status OpStatus, txi, tci int,
+	tx *rtypes.Transaction, tc *txToRosettaTestCase) {
+
+	// The number of operations for this tx should match the one expected
+	// for this test case.
+	if len(tc.ops) != len(tx.Operations) {
+		t.Fatalf("block tx %d vs test case %d: mismatched nb of "+
+			"ops. want=%d got=%d", txi, tci, len(tc.ops),
+			len(tx.Operations))
+	}
+
+	for opi, op := range tx.Operations {
+		assertTestCaseOpsMatch(t, txi, opi, status, op, tc)
+	}
+}
+
+// TestBlockToRosetta tests that converting a Decred block to a Rosetta block
+// works as expected.
+func TestBlockToRosetta(t *testing.T) {
+	regular := wire.TxTreeRegular
+	stake := wire.TxTreeStake
+
+	// Build the test and previous block. The previous block contains the
+	// transactions of the testing context (test cases) that are listed as
+	// reversed.
+	b := &wire.MsgBlock{
+		Header: wire.BlockHeader{
+			Height: 1,
+		},
+	}
+	prev := &wire.MsgBlock{}
+
+	tctx := txToRosettaTestCases()
+	for _, tc := range tctx.testCases {
+		switch {
+		case tc.tree == regular && tc.status == OpStatusSuccess:
+			b.Transactions = append(b.Transactions, tc.tx)
+
+		case tc.tree == regular && tc.status == OpStatusReversed:
+			prev.Transactions = append(prev.Transactions, tc.tx)
+
+		case tc.tree == stake:
+			b.STransactions = append(b.STransactions, tc.tx)
+		}
+	}
+
+	// Add a dummy stx in prev to ensure it doesn't get reversed.
+	prev.STransactions = append(prev.STransactions, b.STransactions[0])
+
+	// First test case: b approves prev.
+	t.Run("approves parent", func(t *testing.T) {
+		b.Header.VoteBits = 0x01
+		rb, err := WireBlockToRosetta(b, prev, tctx.fetchInputs, tctx.chainParams)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// There should be as many txs as Transactions+STransactions.
+		wantTxCount := len(b.Transactions) + len(b.STransactions)
+		if wantTxCount != len(rb.Transactions) {
+			t.Fatalf("unexpected number of txs. want=%d got=%d",
+				wantTxCount, len(rb.Transactions))
+		}
+
+		// Verify transaction data.
+		var tci int // tci == test case index
+		for txi, tx := range rb.Transactions {
+			// Since this first test only checks non-reversed transactions,
+			// skip testcases with wrong op status.
+			for tctx.testCases[tci].status != OpStatusSuccess {
+				tci++
+			}
+			tc := tctx.testCases[tci]
+
+			// Verify the transaction data matches the expected.
+			assertTestCaseTxMatches(t, OpStatusSuccess, txi, tci, tx, tc)
+
+			// Pass on to the next test case.
+			tci++
+		}
+	})
+
+	// Second test case: b disapproves prev.
+	t.Run("disapproves parent", func(t *testing.T) {
+		b.Header.VoteBits = 0x00
+		rb, err := WireBlockToRosetta(b, prev, tctx.fetchInputs, tctx.chainParams)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// There should be as many txs as Transactions + STransactions
+		// + prev.Transaction
+		wantTxCount := len(b.Transactions) + len(b.STransactions) +
+			len(prev.Transactions)
+		if wantTxCount != len(rb.Transactions) {
+			t.Fatalf("unexpected number of txs. want=%d got=%d",
+				wantTxCount, len(rb.Transactions))
+		}
+
+		// Verify transaction data.
+		var tci int // tci == test case index
+		for txi, tx := range rb.Transactions {
+			tc := tctx.testCases[tci]
+
+			// Verify the transaction data matches the expected.
+			assertTestCaseTxMatches(t, tc.status, txi, tci, tx, tc)
+
+			// Pass on to the next test case.
+			tci++
+		}
+	})
+
+	// Third test: b disapproves prev but we haven't provided prev
+	// (function should error).
+	t.Run("disapproves parent with error", func(t *testing.T) {
+		b.Header.VoteBits = 0x00
+		_, err := WireBlockToRosetta(b, nil, tctx.fetchInputs, tctx.chainParams)
+		if err != ErrNeedsPreviousBlock {
+			t.Fatalf("unexpected error. want=%v got=%v", ErrNeedsPreviousBlock, err)
+		}
+	})
 }

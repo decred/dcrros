@@ -319,7 +319,8 @@ func txMetaToRosetta(tx *wire.MsgTx) *rtypes.Transaction {
 // block in rosetta representation. The previous block is needed when the
 // current block disapproved the regular transactions of the previous one, in
 // which case it must be specified or this function errors.
-func WireBlockToRosetta(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher, chainParams *chaincfg.Params) (*rtypes.Block, error) {
+func WireBlockToRosetta(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher,
+	chainParams *chaincfg.Params) (*rtypes.Block, error) {
 
 	approvesParent := VoteBitsApprovesParent(b.Header.VoteBits) || b.Header.Height == 0
 	if !approvesParent && prev == nil {
@@ -390,7 +391,9 @@ func WireBlockToRosetta(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher, c
 
 // MempoolTxToRosetta converts a wire tx that is known to be on the mempool to
 // a rosetta tx.
-func MempoolTxToRosetta(tx *wire.MsgTx, fetchInputs PrevInputsFetcher, chainParams *chaincfg.Params) (*rtypes.Transaction, error) {
+func MempoolTxToRosetta(tx *wire.MsgTx, fetchInputs PrevInputsFetcher,
+	chainParams *chaincfg.Params) (*rtypes.Transaction, error) {
+
 	rtx := txMetaToRosetta(tx)
 	applyOp := func(op *Op) error {
 		rtx.Operations = append(rtx.Operations, op.ROp())
