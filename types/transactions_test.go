@@ -2,6 +2,7 @@ package types
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
@@ -25,32 +26,32 @@ func (tc *rosToTxTestCase) assertMatchesIn(t *testing.T, opIdx int, in *wire.TxI
 	}
 
 	if tc.in.PreviousOutPoint != in.PreviousOutPoint {
-		t.Fatalf("op %d incorect prevout. want=%s got=%s", opIdx,
+		t.Fatalf("op %d incorrect prevout. want=%s got=%s", opIdx,
 			tc.in.PreviousOutPoint, in.PreviousOutPoint)
 	}
 
 	if tc.in.Sequence != in.Sequence {
-		t.Fatalf("op %d incorect sequence. want=%d got=%d", opIdx,
+		t.Fatalf("op %d incorrect sequence. want=%d got=%d", opIdx,
 			tc.in.Sequence, in.Sequence)
 	}
 
 	if tc.in.ValueIn != in.ValueIn {
-		t.Fatalf("op %d incorect valueIn. want=%d got=%d", opIdx,
+		t.Fatalf("op %d incorrect valueIn. want=%d got=%d", opIdx,
 			tc.in.ValueIn, in.ValueIn)
 	}
 
 	if tc.in.BlockHeight != in.BlockHeight {
-		t.Fatalf("op %d incorect blockHeight. want=%d got=%d", opIdx,
+		t.Fatalf("op %d incorrect blockHeight. want=%d got=%d", opIdx,
 			tc.in.BlockHeight, in.BlockHeight)
 	}
 
 	if tc.in.BlockIndex != in.BlockIndex {
-		t.Fatalf("op %d incorect blockIndex. want=%d got=%d", opIdx,
+		t.Fatalf("op %d incorrect blockIndex. want=%d got=%d", opIdx,
 			tc.in.BlockIndex, in.BlockIndex)
 	}
 
 	if !bytes.Equal(tc.in.SignatureScript, in.SignatureScript) {
-		t.Fatalf("op %d incorect sigScript. want=%x got=%x", opIdx,
+		t.Fatalf("op %d incorrect sigScript. want=%x got=%x", opIdx,
 			tc.in.SignatureScript, in.SignatureScript)
 	}
 }
@@ -61,17 +62,17 @@ func (tc *rosToTxTestCase) assertMatchesOut(t *testing.T, opIdx int, out *wire.T
 	}
 
 	if tc.out.Value != out.Value {
-		t.Fatalf("op %d incorect value. want=%d got=%d", opIdx,
+		t.Fatalf("op %d incorrect value. want=%d got=%d", opIdx,
 			tc.out.Value, out.Value)
 	}
 
 	if tc.out.Version != out.Version {
-		t.Fatalf("op %d incorect version. want=%d got=%d", opIdx,
+		t.Fatalf("op %d incorrect version. want=%d got=%d", opIdx,
 			tc.out.Version, out.Version)
 	}
 
 	if !bytes.Equal(tc.out.PkScript, out.PkScript) {
-		t.Fatalf("op %d incorect pkScript. want=%x got=%x", opIdx,
+		t.Fatalf("op %d incorrect pkScript. want=%x got=%x", opIdx,
 			tc.out.PkScript, out.PkScript)
 	}
 }
@@ -396,4 +397,98 @@ func TestExtractSignPayloads(t *testing.T) {
 		pidx++
 		inIdx++
 	}
+}
+
+// TestCombineSigs tests the function that combines signatures to an unsinged
+// transaction.
+func TestCombineSigs(t *testing.T) {
+	chainParams := chaincfg.RegNetParams()
+
+	pk1 := mustHex("ff00934685fb")
+	pk2 := mustHex("ff004685fbfa")
+	sig1 := mustHex("ee00fbfaab00")
+	sig2 := mustHex("ee00faab9200")
+	sigScripts := [][]byte{
+		mustHex("07ee00fbfaab000106ff00934685fb"),
+		mustHex("07ee00fbfaab000106ff00934685fb"),
+	}
+
+	sigs := []*rtypes.Signature{{
+		PublicKey: &rtypes.PublicKey{
+			Bytes: pk1,
+		},
+		SignatureType: rtypes.Ecdsa,
+		Bytes:         sig1,
+	}, {
+		PublicKey: &rtypes.PublicKey{
+			Bytes: pk2,
+		},
+		SignatureType: rtypes.Ecdsa,
+		Bytes:         sig2,
+	}}
+
+	// First test: everything correct.
+	t.Run("correct combine", func(t *testing.T) {
+		tx := wire.NewMsgTx()
+		tx.AddTxIn(&wire.TxIn{})
+		tx.AddTxIn(&wire.TxIn{})
+
+		err := CombineTxSigs(sigs, tx, chainParams)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		for i := range sigs {
+			wantSigScript := sigScripts[i]
+			if !bytes.Equal(wantSigScript, tx.TxIn[0].SignatureScript) {
+				t.Fatalf("sig %d unexpected sigscript. want=%x "+
+					"got=%x", i, wantSigScript, tx.TxIn[0].SignatureScript)
+			}
+		}
+	})
+
+	// Second test: incorrect number of sigs vs inputs.
+	t.Run("incorrect nb of inputs", func(t *testing.T) {
+		tx := wire.NewMsgTx()
+		tx.AddTxIn(&wire.TxIn{})
+
+		err := CombineTxSigs(sigs, tx, chainParams)
+		if err != ErrIncorrectSigCount {
+			t.Fatalf("unexpected error: want=%v got=%v",
+				ErrIncorrectSigCount, err)
+		}
+
+	})
+
+	// Third test: unsupported signature type
+	t.Run("unsupported ecdsaRecovery", func(t *testing.T) {
+		tx := wire.NewMsgTx()
+		tx.AddTxIn(&wire.TxIn{})
+		tx.AddTxIn(&wire.TxIn{})
+
+		sigs[1].SignatureType = rtypes.EcdsaRecovery
+
+		err := CombineTxSigs(sigs, tx, chainParams)
+		if !errors.Is(err, ErrUnsupportedSignatureType) {
+			t.Fatalf("unexpected error: want=%v got=%v",
+				ErrIncorrectSigCount, err)
+		}
+
+	})
+
+	// Fourth test: unsupported signature type
+	t.Run("unsupported ed25519", func(t *testing.T) {
+		tx := wire.NewMsgTx()
+		tx.AddTxIn(&wire.TxIn{})
+		tx.AddTxIn(&wire.TxIn{})
+
+		sigs[1].SignatureType = rtypes.Ed25519
+
+		err := CombineTxSigs(sigs, tx, chainParams)
+		if !errors.Is(err, ErrUnsupportedSignatureType) {
+			t.Fatalf("unexpected error: want=%v got=%v",
+				ErrIncorrectSigCount, err)
+		}
+
+	})
 }
