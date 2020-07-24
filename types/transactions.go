@@ -225,9 +225,15 @@ func RosettaOpsToTx(txMeta map[string]interface{}, ops []*rtypes.Operation, chai
 	return tx, nil
 }
 
-func extractInputSignPayload(op *rtypes.Operation, tx *wire.MsgTx, idx int, chainParams *chaincfg.Params) (*rtypes.SigningPayload, error) {
+func extractInputSignPayload(op *rtypes.Operation, tx *wire.MsgTx, idx int,
+	chainParams *chaincfg.Params) (*rtypes.SigningPayload, error) {
+
 	if idx >= len(tx.TxIn) {
 		return nil, fmt.Errorf("trying to sign inexistent input %d", idx)
+	}
+
+	if op.Account == nil {
+		return nil, fmt.Errorf("account cannot be nil")
 	}
 
 	// TODO: Use the prefix hash (tx.TxHash()) to speed up calculations?

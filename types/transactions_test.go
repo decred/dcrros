@@ -11,9 +11,10 @@ import (
 )
 
 type rosToTxTestCase struct {
-	op  *rtypes.Operation
-	in  *wire.TxIn
-	out *wire.TxOut
+	op     *rtypes.Operation
+	in     *wire.TxIn
+	out    *wire.TxOut
+	signer string
 }
 
 func (tc *rosToTxTestCase) assertMatchesIn(t *testing.T, opIdx int, in *wire.TxIn) {
@@ -85,6 +86,17 @@ func (tctx *rosToTxTestContext) ops() []*rtypes.Operation {
 	return ops
 }
 
+func (tctx *rosToTxTestContext) signers() []string {
+	signers := make([]string, 0, len(tctx.testCases))
+	for _, tc := range tctx.testCases {
+		if tc.signer == "" {
+			continue
+		}
+		signers = append(signers, tc.signer)
+	}
+	return signers
+}
+
 func mustDecodeHash(h string) chainhash.Hash {
 	var hh chainhash.Hash
 	err := chainhash.Decode(&hh, h)
@@ -112,6 +124,14 @@ func rosToTxTestCases() *rosToTxTestContext {
 				"block_height":     uint32(2000),
 				"block_index":      uint32(3000),
 				"signature_script": "102030",
+
+				// Only needed to extract signing payload.
+				"script_version": uint16(0),
+			},
+
+			// Only needed to extract signing payload.
+			Account: &rtypes.AccountIdentifier{
+				Address: "RsPSidp9af5pbGBBQYb3VcRLGzHaPma1Xpv",
 			},
 		},
 		in: &wire.TxIn{
@@ -126,6 +146,66 @@ func rosToTxTestCases() *rosToTxTestContext {
 			BlockIndex:      3000,
 			SignatureScript: []byte{0x10, 0x20, 0x30},
 		},
+		signer: "RsPSidp9af5pbGBBQYb3VcRLGzHaPma1Xpv",
+	}, {
+		op: &rtypes.Operation{
+			Type:   "debit",
+			Amount: amt(30),
+			Metadata: map[string]interface{}{
+				"prev_hash":    prevHash1,
+				"prev_index":   uint32(0),
+				"prev_tree":    int8(0),
+				"sequence":     uint32(0),
+				"block_height": uint32(0),
+				"block_index":  uint32(0),
+
+				// Only needed to extract signing payload.
+				"script_version": uint16(1),
+			},
+
+			// Only needed to extract signing payload.
+			Account: &rtypes.AccountIdentifier{
+				// Despite being a valid address, using the
+				// wrong script_version means this doesn't
+				// become a signer.
+				Address: "RsPSidp9af5pbGBBQYb3VcRLGzHaPma1Xpv",
+			},
+		},
+		in: &wire.TxIn{
+			PreviousOutPoint: wire.OutPoint{
+				Hash: mustDecodeHash(prevHash1),
+			},
+			ValueIn: 30,
+		},
+		signer: "",
+	}, {
+		op: &rtypes.Operation{
+			Type:   "debit",
+			Amount: amt(20),
+			Metadata: map[string]interface{}{
+				"prev_hash":    prevHash1,
+				"prev_index":   uint32(0),
+				"prev_tree":    int8(0),
+				"sequence":     uint32(0),
+				"block_height": uint32(0),
+				"block_index":  uint32(0),
+
+				// Only needed to extract signing payload.
+				"script_version": uint16(0),
+			},
+
+			// Only needed to extract signing payload.
+			Account: &rtypes.AccountIdentifier{
+				Address: "RcaJVhnU11HaKVy95dGaPRMRSSWrb3KK2u1",
+			},
+		},
+		in: &wire.TxIn{
+			PreviousOutPoint: wire.OutPoint{
+				Hash: mustDecodeHash(prevHash1),
+			},
+			ValueIn: 20,
+		},
+		signer: "RcaJVhnU11HaKVy95dGaPRMRSSWrb3KK2u1",
 	}, {
 		op: &rtypes.Operation{
 			Type:   "credit",
@@ -198,6 +278,44 @@ func TestRosettaOpsToTx(t *testing.T) {
 
 			tc.assertMatchesOut(t, opIdx, tx.TxOut[outIdx])
 			outIdx++
+		}
+	}
+}
+
+// TestExtractTxSigners tests that we can extract the correct signers for a
+// given list of Rosetta operations.
+func TestExtractTxSigners(t *testing.T) {
+	tctx := rosToTxTestCases()
+	chainParams := chaincfg.RegNetParams()
+
+	txMeta := map[string]interface{}{
+		"version":  uint16(0),
+		"expiry":   uint32(0),
+		"locktime": uint32(0),
+	}
+
+	// We use RosettaOpsToTx in this test since we only expect to extract
+	// signing payloads from txs constructed by this function.
+	tx, err := RosettaOpsToTx(txMeta, tctx.ops(), chainParams)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	signers, err := ExtractTxSigners(tctx.ops(), tx, chainParams)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantSigners := tctx.signers()
+	if len(wantSigners) != len(signers) {
+		t.Fatalf("unexpected nb of signers. want=%d got=%d",
+			len(wantSigners), len(signers))
+	}
+
+	for i := range wantSigners {
+		if wantSigners[i] != signers[i] {
+			t.Fatalf("wrong order of signers at idx %d. want=%s got=%s",
+				i, wantSigners[i], signers[i])
 		}
 	}
 }
