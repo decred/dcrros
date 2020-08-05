@@ -159,9 +159,6 @@ func (s *Server) preProcessAccounts(ctx context.Context) error {
 	var lastHeight int64
 	err = s.processSequentialBlocks(ctx, startHeight, func(bh *chainhash.Hash, b *wire.MsgBlock) error {
 		err := s.preProcessAccountBlock(ctx, bh, b, prev, utxoSet)
-		if err != nil {
-			return err
-		}
 
 		lastHeight = int64(b.Header.Height)
 		if lastHeight%2000 == 0 {
