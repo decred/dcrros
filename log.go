@@ -6,12 +6,16 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
+	"time"
 
 	"decred.org/dcrros/backend"
 	"github.com/decred/slog"
 	"github.com/jrick/logrotate/rotator"
+	"github.com/matheusd/middlelogger"
 )
 
 // logWriter implements an io.Writer that outputs to both standard output and
@@ -45,6 +49,7 @@ var (
 
 	log     = backendLog.Logger("DROS")
 	bdgrLog = backendLog.Logger("BDGR")
+	httpLog = backendLog.Logger("HTTP")
 )
 
 // Initialize package-global logger variables.
@@ -57,6 +62,7 @@ func init() {
 var subsystemLoggers = map[string]slog.Logger{
 	"DROS": log,
 	"BDGR": bdgrLog,
+	"HTTP": httpLog,
 }
 
 // initLogRotator initializes the logging rotater to write logs to logFile and
@@ -102,4 +108,71 @@ func setLogLevels(logLevel string) {
 	for subsystemID := range subsystemLoggers {
 		setLogLevel(subsystemID, logLevel)
 	}
+}
+
+// requestLogger is an http logger middleware that logs using a local slog
+// instance.
+type requestLogger struct{}
+
+type niceBytes int64
+
+func (n niceBytes) String() string {
+	switch {
+	case n < 1e3:
+		return fmt.Sprintf("%dB", n)
+	case n < 1e6:
+		return fmt.Sprintf("%.2fkB", float64(n)/1e3)
+	case n < 1e9:
+		return fmt.Sprintf("%.2fMB", float64(n)/1e6)
+	case n < 1e12:
+		return fmt.Sprintf("%.2fGB", float64(n)/1e9)
+	default:
+		return fmt.Sprintf("%dB", n)
+	}
+}
+
+// LogRequest is part of the Logger interface.
+func (l requestLogger) LogRequest(ld middlelogger.LogData) {
+	httpLog.Debugf(
+		"%s %s %d %s %s",
+		ld.R.Method,
+		ld.R.RequestURI,
+		ld.Status,
+		ld.TotalTime,
+		niceBytes(ld.BytesWritten),
+	)
+}
+
+// LogPanic is part of the PanicLogger interface.
+func (l requestLogger) LogPanic(ld middlelogger.LogData, err interface{}) {
+	httpLog.Errorf(
+		"%s %s %d %s %s (PANIC %v)",
+		ld.R.Method,
+		ld.R.RequestURI,
+		ld.Status,
+		ld.TotalTime,
+		niceBytes(ld.BytesWritten),
+		err,
+	)
+	httpLog.Errorf(string(debug.Stack()))
+}
+
+func (l requestLogger) Cutoff(*http.Request) time.Duration {
+	return time.Second
+}
+
+func (l requestLogger) MultipleLogs(*http.Request) bool {
+	return true
+}
+
+func (l requestLogger) LogSlowRequest(ld middlelogger.LogData, i int) {
+	httpLog.Infof(
+		"%s %s %d %s %s (slow %d)",
+		ld.R.Method,
+		ld.R.RequestURI,
+		ld.Status,
+		ld.TotalTime,
+		niceBytes(ld.BytesWritten),
+		i,
+	)
 }

@@ -235,7 +235,7 @@ func (s *Server) ConstructionCombine(ctx context.Context,
 //
 // NOTE: This is part of the ConstructionAPIServicer interface.
 func (s *Server) ConstructionHash(ctx context.Context,
-	req *rtypes.ConstructionHashRequest) (*rtypes.ConstructionHashResponse, *rtypes.Error) {
+	req *rtypes.ConstructionHashRequest) (*rtypes.TransactionIdentifierResponse, *rtypes.Error) {
 
 	txBytes, err := hex.DecodeString(req.SignedTransaction)
 	if err != nil {
@@ -247,8 +247,10 @@ func (s *Server) ConstructionHash(ctx context.Context,
 		return nil, types.ErrInvalidTransaction.RError()
 	}
 
-	return &rtypes.ConstructionHashResponse{
-		TransactionHash: tx.TxHash().String(),
+	return &rtypes.TransactionIdentifierResponse{
+		TransactionIdentifier: &rtypes.TransactionIdentifier{
+			Hash: tx.TxHash().String(),
+		},
 	}, nil
 }
 
@@ -256,7 +258,7 @@ func (s *Server) ConstructionHash(ctx context.Context,
 //
 // NOTE: This is part of the ConstructionAPIServicer interface.
 func (s *Server) ConstructionSubmit(ctx context.Context,
-	req *rtypes.ConstructionSubmitRequest) (*rtypes.ConstructionSubmitResponse, *rtypes.Error) {
+	req *rtypes.ConstructionSubmitRequest) (*rtypes.TransactionIdentifierResponse, *rtypes.Error) {
 
 	txBytes, err := hex.DecodeString(req.SignedTransaction)
 	if err != nil {
@@ -288,7 +290,7 @@ func (s *Server) ConstructionSubmit(ctx context.Context,
 		}
 	}
 
-	return &rtypes.ConstructionSubmitResponse{
+	return &rtypes.TransactionIdentifierResponse{
 		TransactionIdentifier: &rtypes.TransactionIdentifier{
 			Hash: txh.String(),
 		},

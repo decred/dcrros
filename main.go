@@ -19,6 +19,7 @@ import (
 	"decred.org/dcrros/backend"
 	"decred.org/dcrros/internal/version"
 	rserver "github.com/coinbase/rosetta-sdk-go/server"
+	"github.com/matheusd/middlelogger"
 )
 
 type routerify rserver.Route
@@ -176,6 +177,7 @@ func _main() error {
 		}()
 	}
 
+	// Create and start the backend Rosetta server.
 	drsvr, err := backend.NewServer(ctx, svrCfg)
 	if err != nil {
 		requestShutdown()
@@ -193,6 +195,7 @@ func _main() error {
 		wg.Done()
 	}()
 
+	// Create and start the http listeners.
 	index := rserver.Route{
 		Name:    "index",
 		Method:  "GET",
@@ -204,6 +207,7 @@ func _main() error {
 	}
 	routes := append(drsvr.Routers(), routerify(index))
 	router := rserver.NewRouter(routes...)
+	router = middlelogger.LoggerMiddleware(router, requestLogger{})
 	svr := &http.Server{
 		Handler: router,
 	}
