@@ -457,6 +457,15 @@ func loadConfig() (*config, []string, error) {
 		configFileError = err
 	}
 
+	// If the AppData dir in the cfg file is not empty and a precfg AppData
+	// was not specified, then use the config file's AppData for data and
+	// log dir.
+	if cfg.AppData != "" && preCfg.AppData == "" {
+		cfg.AppData, _ = filepath.Abs(cleanAndExpandPath(cfg.AppData))
+		defaultDataDir = filepath.Join(cfg.AppData, defaultDataDirname)
+		defaultLogDir = filepath.Join(cfg.AppData, defaultLogDirname, string(defaultActiveNet))
+	}
+
 	// Parse command line options again to ensure they take precedence.
 	remainingArgs, err := parser.Parse()
 	if err != nil {
