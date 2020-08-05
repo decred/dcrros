@@ -176,17 +176,13 @@ func rosettaOpToTx(op *rtypes.Operation, tx *wire.MsgTx, chainParams *chaincfg.P
 		out := &wire.TxOut{
 			Value: int64(opAmt),
 		}
-		if err := metadataUint16(m, "script_version", &out.Version); err != nil {
-			return fmt.Errorf("unable to decode script_version: %v", err)
-		}
 
 		if op.Account == nil {
 			return fmt.Errorf("nil account")
 		}
 
 		var err error
-		out.PkScript, err = rosettaAccountToPkScript(out.Version,
-			op.Account, chainParams)
+		out.Version, out.PkScript, err = rosettaAccountToPkScript(op.Account, chainParams)
 		if err != nil {
 			return fmt.Errorf("unable to decode account into pkscript: %v", err)
 		}
@@ -235,13 +231,16 @@ func extractInputSignPayload(op *rtypes.Operation, tx *wire.MsgTx, idx int,
 	if op.Account == nil {
 		return nil, fmt.Errorf("account cannot be nil")
 	}
+	if op.Account.Metadata == nil {
+		return nil, fmt.Errorf("account.metadata cannot be nil")
+	}
 
 	// TODO: Use the prefix hash (tx.TxHash()) to speed up calculations?
 
 	// Figure out the original version and PkScript given the
 	// address.
 	var version uint16
-	if err := metadataUint16(op.Metadata, "script_version", &version); err != nil {
+	if err := metadataUint16(op.Account.Metadata, "script_version", &version); err != nil {
 		return nil, fmt.Errorf("unable to decode script_version: %v", err)
 	}
 
@@ -330,9 +329,16 @@ func extractInputSigner(op *rtypes.Operation, tx *wire.MsgTx, idx int,
 		return "", fmt.Errorf("trying to sign inexistent input %d", idx)
 	}
 
+	if op.Account == nil {
+		return "", fmt.Errorf("nil account")
+	}
+	if op.Account.Metadata == nil {
+		return "", fmt.Errorf("nil metadata")
+	}
+
 	// Figure out the original version and PkScript given the address.
 	var version uint16
-	if err := metadataUint16(op.Metadata, "script_version", &version); err != nil {
+	if err := metadataUint16(op.Account.Metadata, "script_version", &version); err != nil {
 		return "", fmt.Errorf("unable to decode script_version: %v", err)
 	}
 
@@ -368,8 +374,8 @@ func ExtractTxSigners(ops []*rtypes.Operation, tx *wire.MsgTx,
 
 		signer, err := extractInputSigner(op, tx, inIdx, chainParams)
 		if err != nil {
-			return nil, ErrInvalidOp.Msgf("error generating "+
-				"payload for op %d: %v", i, err)
+			return nil, ErrInvalidOp.Msgf("error extracting "+
+				"input signer for op %d: %v", i, err)
 
 		}
 		inIdx++

@@ -127,14 +127,14 @@ func rosToTxTestCases() *rosToTxTestContext {
 				"block_height":     uint32(2000),
 				"block_index":      uint32(3000),
 				"signature_script": "102030",
-
-				// Only needed to extract signing payload.
-				"script_version": uint16(0),
 			},
 
 			// Only needed to extract signing payload.
 			Account: &rtypes.AccountIdentifier{
 				Address: "RsPSidp9af5pbGBBQYb3VcRLGzHaPma1Xpv",
+				Metadata: map[string]interface{}{
+					"script_version": uint16(0),
+				},
 			},
 		},
 		in: &wire.TxIn{
@@ -161,9 +161,6 @@ func rosToTxTestCases() *rosToTxTestContext {
 				"sequence":     uint32(0),
 				"block_height": uint32(0),
 				"block_index":  uint32(0),
-
-				// Only needed to extract signing payload.
-				"script_version": uint16(1),
 			},
 
 			// Only needed to extract signing payload.
@@ -172,6 +169,9 @@ func rosToTxTestCases() *rosToTxTestContext {
 				// wrong script_version means this doesn't
 				// become a signer.
 				Address: "RsPSidp9af5pbGBBQYb3VcRLGzHaPma1Xpv",
+				Metadata: map[string]interface{}{
+					"script_version": uint16(1),
+				},
 			},
 		},
 		in: &wire.TxIn{
@@ -192,14 +192,14 @@ func rosToTxTestCases() *rosToTxTestContext {
 				"sequence":     uint32(0),
 				"block_height": uint32(0),
 				"block_index":  uint32(0),
-
-				// Only needed to extract signing payload.
-				"script_version": uint16(0),
 			},
 
 			// Only needed to extract signing payload.
 			Account: &rtypes.AccountIdentifier{
 				Address: "RcaJVhnU11HaKVy95dGaPRMRSSWrb3KK2u1",
+				Metadata: map[string]interface{}{
+					"script_version": uint16(0),
+				},
 			},
 		},
 		in: &wire.TxIn{
@@ -214,11 +214,13 @@ func rosToTxTestCases() *rosToTxTestContext {
 			Type:   "credit",
 			Amount: amt(20),
 			Metadata: map[string]interface{}{
-				"script_version": uint16(0),
-				"pk_script":      pks1,
+				"pk_script": pks1,
 			},
 			Account: &rtypes.AccountIdentifier{
 				Address: "RsPSidp9af5pbGBBQYb3VcRLGzHaPma1Xpv",
+				Metadata: map[string]interface{}{
+					"script_version": uint16(0),
+				},
 			},
 		},
 		out: &wire.TxOut{

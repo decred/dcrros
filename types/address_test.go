@@ -167,12 +167,20 @@ func TestRosettaAccountToPkScript(t *testing.T) {
 		ok := t.Run(tc.name, func(t *testing.T) {
 			acct := &rtypes.AccountIdentifier{
 				Address: tc.addr,
+				Metadata: map[string]interface{}{
+					"script_version": tc.version,
+				},
 			}
-			got, err := rosettaAccountToPkScript(tc.version, acct, tc.net)
+			gotVersion, got, err := rosettaAccountToPkScript(acct, tc.net)
 			gotValid := err == nil
 			if tc.valid != gotValid {
 				t.Fatalf("unexpected validity: want=%v got=%v",
 					tc.valid, err)
+			}
+
+			if gotVersion != tc.version {
+				t.Fatalf("unexpected version. want=%d got=%d",
+					tc.version, gotVersion)
 			}
 
 			if !bytes.Equal(tc.wantPks, got) {

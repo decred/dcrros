@@ -44,7 +44,7 @@ func (s *Server) ConstructionDerive(ctx context.Context,
 	// ensures that once we move to new address formats, an old dcrros will
 	// fail requests from clients using the new format instead of returning
 	// an address in an unexpected format.
-	version, ok := req.Metadata["version"]
+	version, ok := req.Metadata["script_version"]
 	if !ok {
 		return nil, types.ErrUnspecifiedAddressVersion.RError()
 	}

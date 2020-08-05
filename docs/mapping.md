@@ -43,6 +43,9 @@ For example, the testnet output [caf9baa6aa2f73ab06408d64482ef0502dcad7e4283dd99
         "status": "success",
         "account": {
           "address": "0x000176a914936061ad3f1cc6591a15a81a0c561a10a459fbcd88ac"
+	  "metadata": {
+          	"script_version": 1
+	  }
         },
         "amount": {
           "value": "8803",
@@ -53,7 +56,6 @@ For example, the testnet output [caf9baa6aa2f73ab06408d64482ef0502dcad7e4283dd99
         },
         "metadata": {
           "output_index": 0,
-          "script_version": 1
         }
       }
     ]

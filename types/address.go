@@ -82,20 +82,33 @@ func dcrPkScriptToAccountAddr(version uint16, pkScript []byte, chainParams *chai
 
 // rosettaAccountToPkScript converts the given Rosetta account and version
 // information into a PkScript.
-func rosettaAccountToPkScript(version uint16, account *rtypes.AccountIdentifier,
-	chainParams *chaincfg.Params) ([]byte, error) {
+func rosettaAccountToPkScript(account *rtypes.AccountIdentifier,
+	chainParams *chaincfg.Params) (uint16, []byte, error) {
+
+	if account.Metadata == nil {
+		return 0, nil, fmt.Errorf("nil account metadata")
+	}
+
+	var version uint16
+	if err := metadataUint16(account.Metadata, "script_version", &version); err != nil {
+		return 0, nil, fmt.Errorf("unable to decode script_version: %v", err)
+	}
+
+	var pkscript []byte
+	var err error
 
 	// Versions other than 0 aren't standardized yet, so account
 	// addresseses using that should be decoded using that version or with
 	// an 0x prefix need are raw pk scripts.
 	if version != 0 || strings.HasPrefix(account.Address, "0x") {
-		return rawAccountAddrToPkScript(version, account.Address)
+		pkscript, err = rawAccountAddrToPkScript(version, account.Address)
+	} else {
+		var addr dcrutil.Address
+		addr, err = dcrutil.DecodeAddress(account.Address, chainParams)
+		if err == nil {
+			pkscript, err = txscript.PayToAddrScript(addr)
+		}
 	}
 
-	addr, err := dcrutil.DecodeAddress(account.Address, chainParams)
-	if err != nil {
-		return nil, err
-	}
-
-	return txscript.PayToAddrScript(addr)
+	return version, pkscript, err
 }

@@ -39,23 +39,27 @@ type PrevInput struct {
 type PrevInputsFetcher func(...*wire.OutPoint) (map[wire.OutPoint]*PrevInput, error)
 
 type Op struct {
-	Tree      int8
-	Status    OpStatus
-	Tx        *wire.MsgTx
-	TxIndex   int
-	IOIndex   int
-	Account   string
-	Type      OpType
-	OpIndex   int64
-	Amount    dcrutil.Amount
-	In        *wire.TxIn
-	Out       *wire.TxOut
-	PrevInput *PrevInput
+	Tree           int8
+	Status         OpStatus
+	Tx             *wire.MsgTx
+	TxIndex        int
+	IOIndex        int
+	Account        string
+	AccountVersion uint16
+	Type           OpType
+	OpIndex        int64
+	Amount         dcrutil.Amount
+	In             *wire.TxIn
+	Out            *wire.TxOut
+	PrevInput      *PrevInput
 }
 
 func (op *Op) ROp() *rtypes.Operation {
 	account := &rtypes.AccountIdentifier{
 		Address: op.Account,
+		Metadata: map[string]interface{}{
+			"script_version": op.AccountVersion,
+		},
 	}
 	var meta map[string]interface{}
 	if op.Type == OpTypeDebit {
@@ -68,12 +72,10 @@ func (op *Op) ROp() *rtypes.Operation {
 			"block_height":     op.In.BlockHeight,
 			"block_index":      op.In.BlockIndex,
 			"signature_script": op.In.SignatureScript,
-			"script_version":   op.PrevInput.Version,
 		}
 	} else {
 		meta = map[string]interface{}{
-			"output_index":   op.IOIndex,
-			"script_version": op.Out.Version,
+			"output_index": op.IOIndex,
 		}
 	}
 
@@ -145,6 +147,7 @@ func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpC
 				return fmt.Errorf("missing prev outpoint %s", in.PreviousOutPoint)
 			}
 
+			op.AccountVersion = op.PrevInput.Version
 			op.Account, err = dcrPkScriptToAccountAddr(op.PrevInput.Version,
 				op.PrevInput.PkScript, chainParams)
 			if err != nil {
@@ -191,6 +194,7 @@ func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpC
 				continue
 			}
 
+			op.AccountVersion = out.Version
 			op.Account, err = dcrPkScriptToAccountAddr(out.Version,
 				out.PkScript, chainParams)
 			if err != nil {
