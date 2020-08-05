@@ -42,8 +42,8 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 	txOut2 := &wire.TxOut{Value: 2, PkScript: pks2}
 
 	// Ticket Submission (voting address).
-	pksTicketSubmission := mustHex("6a1ed251f3a9ff398efbd95738a40efe0ddbd18e764234ebf69a000000000058")
-	addrTicketSubmission := "0x00006a1ed251f3a9ff398efbd95738a40efe0ddbd18e764234ebf69a000000000058"
+	pksTicketSubmission := mustHex("ba76a9143f8ab3606760cc0aad241d3b61294b8020c106f988ac")
+	addrTicketSubmission := "RsE8neMcziiKdZEGMCUuLVsUh24bVBrtvpg"
 	txOutTicketSubmission := &wire.TxOut{Value: 10, PkScript: pksTicketSubmission}
 
 	// Ticket Commitment (reward address).

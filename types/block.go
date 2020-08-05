@@ -113,15 +113,19 @@ func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpC
 	isVote := op.Tree == wire.TxTreeStake && stake.IsSSGen(tx)
 	isCoinbase := op.Tree == wire.TxTreeRegular && op.TxIndex == 0
 
+	// TODO: Use dcrd's stake.IsTreasuryBase once published instead of this
+	// hack.
+	isTicket := op.Tree == wire.TxTreeStake && !isVote && stake.IsSStx(tx)
+	isTreasuryBase := op.Tree == wire.TxTreeStake && op.TxIndex == 0 && !isVote && !isTicket
+
 	// Fetch the relevant data for the inputs.
 	prevOutpoints := make([]*wire.OutPoint, 0, len(tx.TxIn))
 	for i, in := range tx.TxIn {
-		if i == 0 && (isVote || isCoinbase) {
+		if i == 0 && (isVote || isCoinbase || isTreasuryBase) {
 			// Coinbases don't have an input with i > 0 so this is
 			// safe.
 			continue
 		}
-
 		prevOutpoints = append(prevOutpoints, &in.PreviousOutPoint)
 	}
 	prevInputs, err := fetchInputs(prevOutpoints...)
@@ -137,7 +141,7 @@ func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpC
 		op.Out = nil
 
 		for i, in := range tx.TxIn {
-			if i == 0 && (isVote || isCoinbase) {
+			if i == 0 && (isVote || isCoinbase || isTreasuryBase) {
 				// Coinbases don't have an input with i > 0.
 				continue
 			}
