@@ -318,9 +318,9 @@ func TestExtractTxSigners(t *testing.T) {
 	}
 
 	for i := range wantSigners {
-		if wantSigners[i] != signers[i] {
+		if wantSigners[i] != signers[i].Address {
 			t.Fatalf("wrong order of signers at idx %d. want=%s got=%s",
-				i, wantSigners[i], signers[i])
+				i, wantSigners[i], signers[i].Address)
 		}
 	}
 }
@@ -382,9 +382,9 @@ func TestExtractSignPayloads(t *testing.T) {
 		}
 
 		pay := payloads[pidx]
-		if pay.Address != addr.Address() {
+		if pay.AccountIdentifier.Address != addr.Address() {
 			t.Fatalf("tc %d unexpected address. want=%s got=%s",
-				tci, addr.Address(), pay.Address)
+				tci, addr.Address(), pay.AccountIdentifier.Address)
 		}
 
 		if !bytes.Equal(pay.Bytes, sigHash) {

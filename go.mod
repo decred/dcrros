@@ -3,7 +3,7 @@ module decred.org/dcrros
 go 1.14
 
 require (
-	github.com/coinbase/rosetta-sdk-go v0.3.3
+	github.com/coinbase/rosetta-sdk-go v0.4.4
 	github.com/decred/dcrd/blockchain/stake/v3 v3.0.0-20200623174822-e2d77e4e7efe
 	github.com/decred/dcrd/chaincfg/chainhash v1.0.2
 	github.com/decred/dcrd/chaincfg/v3 v3.0.0-20200215031403-6b2ce76f0986
@@ -17,9 +17,9 @@ require (
 	github.com/decred/dcrd/txscript/v3 v3.0.0-20200623174822-e2d77e4e7efe
 	github.com/decred/dcrd/wire v1.3.0
 	github.com/decred/slog v1.0.0
-	github.com/dgraph-io/badger/v2 v2.0.3
+	github.com/dgraph-io/badger/v2 v2.2007.2
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/jrick/logrotate v1.0.0
 	github.com/matheusd/middlelogger v0.1.1
-	golang.org/x/sync v0.0.0-20200317015054-43a5402ce75a
+	golang.org/x/sync v0.0.0-20200625203802-6e8e738ad208
 )

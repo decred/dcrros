@@ -92,7 +92,12 @@ func (s *Server) ConstructionDerive(ctx context.Context,
 	}
 
 	return &rtypes.ConstructionDeriveResponse{
-		Address: addr.Address(),
+		AccountIdentifier: &rtypes.AccountIdentifier{
+			Address: addr.Address(),
+			Metadata: map[string]interface{}{
+				"script_version": version,
+			},
+		},
 	}, nil
 }
 
@@ -192,9 +197,9 @@ func (s *Server) ConstructionParse(ctx context.Context,
 	}
 
 	return &rtypes.ConstructionParseResponse{
-		Operations: rtx.Operations,
-		Metadata:   rtx.Metadata,
-		Signers:    signers,
+		Operations:               rtx.Operations,
+		Metadata:                 rtx.Metadata,
+		AccountIdentifierSigners: signers,
 	}, nil
 }
 

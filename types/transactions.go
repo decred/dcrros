@@ -281,9 +281,9 @@ func extractInputSignPayload(op *rtypes.Operation, tx *wire.MsgTx, idx int,
 	}
 
 	return &rtypes.SigningPayload{
-		Address:       op.Account.Address,
-		Bytes:         sigHash,
-		SignatureType: sigType,
+		AccountIdentifier: op.Account,
+		Bytes:             sigHash,
+		SignatureType:     sigType,
 	}, nil
 }
 
@@ -324,22 +324,22 @@ func ExtractSignPayloads(ops []*rtypes.Operation, tx *wire.MsgTx,
 }
 
 func extractInputSigner(op *rtypes.Operation, tx *wire.MsgTx, idx int,
-	chainParams *chaincfg.Params) (string, error) {
+	chainParams *chaincfg.Params) (*rtypes.AccountIdentifier, error) {
 	if idx >= len(tx.TxIn) {
-		return "", fmt.Errorf("trying to sign inexistent input %d", idx)
+		return nil, fmt.Errorf("trying to sign inexistent input %d", idx)
 	}
 
 	if op.Account == nil {
-		return "", fmt.Errorf("nil account")
+		return nil, fmt.Errorf("nil account")
 	}
 	if op.Account.Metadata == nil {
-		return "", fmt.Errorf("nil metadata")
+		return nil, fmt.Errorf("nil metadata")
 	}
 
 	// Figure out the original version and PkScript given the address.
 	var version uint16
 	if err := metadataUint16(op.Account.Metadata, "script_version", &version); err != nil {
-		return "", fmt.Errorf("unable to decode script_version: %v", err)
+		return nil, fmt.Errorf("unable to decode script_version: %v", err)
 	}
 
 	// Addresses with a version other than zero or encoded in raw format
@@ -348,11 +348,11 @@ func extractInputSigner(op *rtypes.Operation, tx *wire.MsgTx, idx int,
 	// some other PSDT signer) so we don't error out on those cases but
 	// simply signal that those inputs don't produce a signing payload.
 	if version != 0 || strings.HasPrefix(op.Account.Address, "0x") {
-		return "", nil
+		return nil, nil
 	}
 
 	// The signer is the original account address.
-	return op.Account.Address, nil
+	return op.Account, nil
 }
 
 // ExtractTxSigners returns the list of signers from the given set of Rosetta
@@ -361,9 +361,9 @@ func extractInputSigner(op *rtypes.Operation, tx *wire.MsgTx, idx int,
 // If the operations do not correspond to the transaction, the results are
 // undefined.
 func ExtractTxSigners(ops []*rtypes.Operation, tx *wire.MsgTx,
-	chainParams *chaincfg.Params) ([]string, error) {
+	chainParams *chaincfg.Params) ([]*rtypes.AccountIdentifier, error) {
 
-	signers := make([]string, 0, len(tx.TxIn))
+	signers := make([]*rtypes.AccountIdentifier, 0, len(tx.TxIn))
 
 	var inIdx int
 	for i, op := range ops {
@@ -382,7 +382,7 @@ func ExtractTxSigners(ops []*rtypes.Operation, tx *wire.MsgTx,
 
 		// Some inputs are valid but we don't know how to produce a
 		// SigningPayload for, so we just skip those.
-		if signer != "" {
+		if signer != nil {
 			signers = append(signers, signer)
 		}
 	}
