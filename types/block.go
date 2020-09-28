@@ -64,6 +64,7 @@ func (op *Op) ROp() *rtypes.Operation {
 		},
 	}
 	var meta map[string]interface{}
+	var coinChange *rtypes.CoinChange
 	if op.Type == OpTypeDebit {
 		meta = map[string]interface{}{
 			"input_index":      op.IOIndex,
@@ -75,9 +76,41 @@ func (op *Op) ROp() *rtypes.Operation {
 			"block_index":      op.In.BlockIndex,
 			"signature_script": op.In.SignatureScript,
 		}
+
+		coinAction := rtypes.CoinSpent
+		if op.Status == OpStatusReversed {
+			coinAction = rtypes.CoinCreated
+		}
+
+		// TODO: support tspend input (doesn't spend coins).
+		coinChange = &rtypes.CoinChange{
+			CoinAction: coinAction,
+			CoinIdentifier: &rtypes.CoinIdentifier{
+				Identifier: op.In.PreviousOutPoint.String(),
+			},
+		}
 	} else {
 		meta = map[string]interface{}{
 			"output_index": op.IOIndex,
+		}
+
+		// TODO: support tadd[0] output (doesn't create coins).
+		outp := wire.OutPoint{
+			Hash:  op.TxHash,
+			Index: uint32(op.IOIndex),
+			Tree:  op.Tree,
+		}
+
+		coinAction := rtypes.CoinCreated
+		if op.Status == OpStatusReversed {
+			coinAction = rtypes.CoinSpent
+		}
+
+		coinChange = &rtypes.CoinChange{
+			CoinAction: coinAction,
+			CoinIdentifier: &rtypes.CoinIdentifier{
+				Identifier: outp.String(),
+			},
 		}
 	}
 
@@ -85,11 +118,12 @@ func (op *Op) ROp() *rtypes.Operation {
 		OperationIdentifier: &rtypes.OperationIdentifier{
 			Index: op.OpIndex,
 		},
-		Type:     op.Type.RType(),
-		Status:   string(op.Status),
-		Account:  account,
-		Amount:   DcrAmountToRosetta(op.Amount),
-		Metadata: meta,
+		Type:       op.Type.RType(),
+		Status:     string(op.Status),
+		Account:    account,
+		Amount:     DcrAmountToRosetta(op.Amount),
+		Metadata:   meta,
+		CoinChange: coinChange,
 	}
 
 }
@@ -421,6 +455,7 @@ func MempoolTxToRosetta(tx *wire.MsgTx, fetchInputs PrevInputsFetcher,
 
 	op := Op{
 		Tx:     tx,
+		TxHash: txh,
 		Tree:   tree,
 		Status: OpStatusSuccess,
 
