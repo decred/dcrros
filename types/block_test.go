@@ -5,9 +5,20 @@ import (
 	"testing"
 
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
+	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
+	"github.com/decred/dcrd/dcrutil/v3"
 	"github.com/decred/dcrd/wire"
 )
+
+type testOp struct {
+	Type    OpType
+	IOIndex int
+	Out     *wire.TxOut
+	Account string
+	Amount  dcrutil.Amount
+	In      *wire.TxIn
+}
 
 type txToRosettaTestCase struct {
 	name    string
@@ -15,7 +26,8 @@ type txToRosettaTestCase struct {
 	txIndex int
 	status  OpStatus
 	tx      *wire.MsgTx
-	ops     []Op
+	txHash  chainhash.Hash
+	ops     []testOp
 }
 
 type txToRosettaTestCtx struct {
@@ -30,6 +42,9 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 	chainParams := chaincfg.RegNetParams()
 	regular := wire.TxTreeRegular
 	stake := wire.TxTreeStake
+
+	// A dummy tx hash.
+	txh := chainhash.HashH([]byte{1, 2, 3})
 
 	// P2PKH address.
 	pks1 := mustHex("76a914a5a7f924934685fbca3008c9524dae1cea9f9d3488ac")
@@ -80,9 +95,9 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 
 	// Two generic inputs, one from the regular tx tree one from the stake
 	// tx tree.
-	prevOut1 := &wire.OutPoint{Index: 1, Tree: regular}
+	prevOut1 := &wire.OutPoint{Hash: txh, Index: 1, Tree: regular}
 	txIn1 := &wire.TxIn{PreviousOutPoint: *prevOut1}
-	prevOut2 := &wire.OutPoint{Index: 2, Tree: stake}
+	prevOut2 := &wire.OutPoint{Hash: txh, Index: 2, Tree: stake}
 	txIn2 := &wire.TxIn{PreviousOutPoint: *prevOut2}
 
 	// TxIn that spends a ticket submission.
@@ -138,7 +153,8 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 				txOut2, // PoW reward
 			},
 		},
-		ops: []Op{{ // Treasury
+		txHash: txh,
+		ops: []testOp{{ // Treasury
 			Type:    OpTypeCredit,
 			IOIndex: 0,
 			Out:     txOut1,
@@ -166,7 +182,8 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 				txOut2,
 			},
 		},
-		ops: []Op{{ // TxOut[0]
+		txHash: txh,
+		ops: []testOp{{ // TxOut[0]
 			Type:    OpTypeCredit,
 			IOIndex: 0,
 			Out:     txOut1,
@@ -206,7 +223,8 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 				txOut2, // PoW reward
 			},
 		},
-		ops: []Op{{ // Treasury
+		txHash: txh,
+		ops: []testOp{{ // Treasury
 			Type:    OpTypeCredit,
 			IOIndex: 0,
 			Out:     txOut1,
@@ -234,7 +252,8 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 				txOut2,
 			},
 		},
-		ops: []Op{{ // TxIn[0]
+		txHash: txh,
+		ops: []testOp{{ // TxIn[0]
 			Type:    OpTypeDebit,
 			IOIndex: 0,
 			In:      txIn1,
@@ -277,7 +296,8 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 				txOutTicketChange,
 			},
 		},
-		ops: []Op{{ // TxIn[0]
+		txHash: txh,
+		ops: []testOp{{ // TxIn[0]
 			Type:    OpTypeDebit,
 			IOIndex: 0,
 			In:      txIn1,
@@ -325,7 +345,8 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 				txOutStakegen,
 			},
 		},
-		ops: []Op{{ // TxIn[1]
+		txHash: txh,
+		ops: []testOp{{ // TxIn[1]
 			Type:    OpTypeDebit,
 			IOIndex: 1,
 			In:      txInTicketSubmission,
@@ -358,7 +379,8 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 				txOutRevoke,
 			},
 		},
-		ops: []Op{{ // TxIn[1]
+		txHash: txh,
+		ops: []testOp{{ // TxIn[1]
 			Type:    OpTypeDebit,
 			IOIndex: 0,
 			In:      txInTicketSubmission,
@@ -447,6 +469,7 @@ func TestTxToBlockOps(t *testing.T) {
 			op := &Op{
 				Tree:    tc.tree,
 				Tx:      tc.tx,
+				TxHash:  tc.txHash,
 				TxIndex: tc.txIndex,
 				Status:  tc.status,
 			}

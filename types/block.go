@@ -10,6 +10,7 @@ import (
 
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/blockchain/stake/v3"
+	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrutil/v3"
 	"github.com/decred/dcrd/wire"
@@ -42,6 +43,7 @@ type Op struct {
 	Tree           int8
 	Status         OpStatus
 	Tx             *wire.MsgTx
+	TxHash         chainhash.Hash
 	TxIndex        int
 	IOIndex        int
 	Account        string
@@ -101,6 +103,7 @@ type BlockOpCb = func(op *Op) error
 // information:
 // - Tree
 // - Tx
+// - TxHash
 // - TxIndex
 // - OpIndex
 // - Status
@@ -280,6 +283,7 @@ func IterateBlockOps(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher,
 		}
 		for i, tx := range txs {
 			op.Tx = tx
+			op.TxHash = tx.TxHash()
 			op.TxIndex = i
 			op.OpIndex = 0
 			err := iterateBlockOpsInTx(&op, fetchInputs, applyOp,
@@ -308,10 +312,10 @@ func IterateBlockOps(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher,
 	return nil
 }
 
-func txMetaToRosetta(tx *wire.MsgTx) *rtypes.Transaction {
+func txMetaToRosetta(tx *wire.MsgTx, txHash *chainhash.Hash) *rtypes.Transaction {
 	return &rtypes.Transaction{
 		TransactionIdentifier: &rtypes.TransactionIdentifier{
-			Hash: tx.TxHash().String(),
+			Hash: txHash.String(),
 		},
 		Operations: []*rtypes.Operation{},
 		Metadata: map[string]interface{}{
@@ -348,7 +352,7 @@ func WireBlockToRosetta(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher,
 	applyOp := func(op *Op) error {
 		if op.OpIndex == 0 {
 			// Starting a new transaction.
-			tx = txMetaToRosetta(op.Tx)
+			tx = txMetaToRosetta(op.Tx, &op.TxHash)
 			txs = append(txs, tx)
 		}
 		tx.Operations = append(tx.Operations, op.ROp())
@@ -402,7 +406,8 @@ func WireBlockToRosetta(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher,
 func MempoolTxToRosetta(tx *wire.MsgTx, fetchInputs PrevInputsFetcher,
 	chainParams *chaincfg.Params) (*rtypes.Transaction, error) {
 
-	rtx := txMetaToRosetta(tx)
+	txh := tx.TxHash()
+	rtx := txMetaToRosetta(tx, &txh)
 	applyOp := func(op *Op) error {
 		rtx.Operations = append(rtx.Operations, op.ROp())
 		return nil
