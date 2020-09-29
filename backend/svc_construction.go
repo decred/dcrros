@@ -18,6 +18,20 @@ import (
 	"github.com/decred/dcrd/wire"
 )
 
+const (
+	// p2pkhSigScriptSerSize is the maximum serialization size for a standard v0
+	// signature script field that redeems a P2PKH output.
+	//
+	// It is calculated as VarIntSerializeSize(108) + OP_DATA_73 + [72 byte sig +
+	// sig hash type] + OP_DATA_33 + [33 byte pubkey]
+	//
+	// Total: 109 bytes.
+	p2pkhSigScriptSerSize = 109
+
+	// networkFee is the widely used network relay fee in Atoms/kB.
+	networkFee = int64(1e4)
+)
+
 var _ rserver.ConstructionAPIServicer = (*Server)(nil)
 
 // ConstructionDerive derives a new Decred address from a public key. Several
@@ -107,23 +121,58 @@ func (s *Server) ConstructionDerive(ctx context.Context,
 // Decred doesn't currently need any metadata.
 //
 // NOTE: This is part of the ConstructionAPIServicer interface.
-func (s *Server) ConstructionPreprocess(context.Context,
-	*rtypes.ConstructionPreprocessRequest) (*rtypes.ConstructionPreprocessResponse, *rtypes.Error) {
+func (s *Server) ConstructionPreprocess(ctx context.Context,
+	req *rtypes.ConstructionPreprocessRequest) (*rtypes.ConstructionPreprocessResponse, *rtypes.Error) {
 
-	return &rtypes.ConstructionPreprocessResponse{}, nil
+	// Calculate the required fee for this tx.
+	tx, err := types.RosettaOpsToTx(req.Metadata, req.Operations, s.chainParams)
+	if err != nil {
+		return nil, types.RError(err)
+	}
+
+	// Figure out how many inputs are not signed and assume they are standard
+	// P2PKH.
+	var nbInputs int
+	for _, in := range tx.TxIn {
+		if len(in.SignatureScript) == 0 {
+			nbInputs++
+		}
+	}
+	serSize := nbInputs*p2pkhSigScriptSerSize + tx.SerializeSize()
+
+	return &rtypes.ConstructionPreprocessResponse{
+		Options: map[string]interface{}{
+			"serialize_size": serSize,
+		},
+	}, nil
 }
 
 // ConstructionMetadata returns metadata required to build a valid Decred
 // transaction.
 //
-// Decred doesn't currently need any metadata.
-//
 // NOTE: This is part of the ConstructionAPIServicer interface.
-func (s *Server) ConstructionMetadata(context.Context,
-	*rtypes.ConstructionMetadataRequest) (*rtypes.ConstructionMetadataResponse, *rtypes.Error) {
+func (s *Server) ConstructionMetadata(ctx context.Context,
+	req *rtypes.ConstructionMetadataRequest) (*rtypes.ConstructionMetadataResponse, *rtypes.Error) {
+
+	serSizeRaw, ok := req.Options["serialize_size"]
+	if !ok {
+		return nil, types.RError(types.ErrSerializeSizeUnspecified)
+	}
+	var serSize int64
+	switch serSizeRaw := serSizeRaw.(type) {
+	case float64:
+		serSize = int64(serSizeRaw)
+	case int:
+		serSize = int64(serSizeRaw)
+	default:
+		return nil, types.RError(types.ErrSerSizeNotNumber)
+	}
+
+	fee := dcrutil.Amount(serSize * networkFee / 1000)
 
 	return &rtypes.ConstructionMetadataResponse{
-		Metadata: map[string]interface{}{},
+		Metadata:     map[string]interface{}{},
+		SuggestedFee: []*rtypes.Amount{types.DcrAmountToRosetta(fee)},
 	}, nil
 }
 

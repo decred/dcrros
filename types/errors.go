@@ -53,6 +53,8 @@ const (
 	ErrInvalidTxMetadata
 	ErrIncorrectSigCount
 	ErrUnsupportedSignatureType
+	ErrSerializeSizeUnspecified
+	ErrSerSizeNotNumber
 
 	// This MUST be the last member.
 	nbErrorCodes
@@ -86,6 +88,8 @@ var errorCodeMsgs = map[ErrorCode]string{
 	ErrInvalidTxMetadata:         "invalid tx metadata",
 	ErrIncorrectSigCount:         "incorrect signature count",
 	ErrUnsupportedSignatureType:  "unsupported signature type",
+	ErrSerializeSizeUnspecified:  "serialize_size was not specified",
+	ErrSerSizeNotNumber:          "serialize_size is not a number",
 }
 
 // Error returns the default error message for the given error code.
