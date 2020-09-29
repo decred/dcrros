@@ -245,6 +245,12 @@ func (s *Server) ConstructionParse(ctx context.Context,
 		return nil, types.RError(err)
 	}
 
+	// The returned operations on this endpoint must have an empty status,
+	// so clear them out here.
+	for _, op := range rtx.Operations {
+		op.Status = ""
+	}
+
 	return &rtypes.ConstructionParseResponse{
 		Operations:               rtx.Operations,
 		Metadata:                 rtx.Metadata,
