@@ -64,7 +64,7 @@ func dcrPkScriptToAccountAddr(version uint16, pkScript []byte, chainParams *chai
 		return pkScriptToRawAccountAddr(version, pkScript), nil
 	}
 
-	_, addrs, _, err := txscript.ExtractPkScriptAddrs(version, pkScript, chainParams)
+	_, addrs, _, err := txscript.ExtractPkScriptAddrs(version, pkScript, chainParams, true)
 	if err != nil {
 		// Currently the only possible error is due to version != 0,
 		// which is handled above, but err on the side of caution.

@@ -147,7 +147,7 @@ func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpC
 	chainParams *chaincfg.Params) error {
 
 	tx := op.Tx
-	isVote := op.Tree == wire.TxTreeStake && stake.IsSSGen(tx)
+	isVote := op.Tree == wire.TxTreeStake && stake.IsSSGen(tx, true)
 	isCoinbase := op.Tree == wire.TxTreeRegular && op.TxIndex == 0
 
 	// TODO: Use dcrd's stake.IsTreasuryBase once published instead of this
@@ -447,7 +447,7 @@ func MempoolTxToRosetta(tx *wire.MsgTx, fetchInputs PrevInputsFetcher,
 		return nil
 	}
 
-	txType := stake.DetermineTxType(tx)
+	txType := stake.DetermineTxType(tx, true)
 	tree := wire.TxTreeRegular
 	if txType != stake.TxTypeRegular {
 		tree = wire.TxTreeStake
