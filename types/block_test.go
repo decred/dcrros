@@ -9,6 +9,7 @@ import (
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -96,6 +97,16 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 	txOutRevoke := &wire.TxOut{Value: 9, PkScript: pksRevoke}
 	addrRevoke := "RsHXxW7fvSuCbnv5azixFrGW6t5xJhRVv7z"
 
+	// Treasury base outputs.
+	pksTBase := mustHex("c1")
+	txOutTBase := &wire.TxOut{Value: 15, PkScript: pksTBase}
+
+	// Treasury spend outputs.
+	pksTSpendOpRet := mustHex("6a2054c6e01922c7099a7d7b416938a2dfaea32988f0412b75a73b07355c77000000")
+	txOutTSpendOptRet := &wire.TxOut{PkScript: pksTSpendOpRet}
+	pksTSpendOut := append([]byte{txscript.OP_TGEN}, pks1...)
+	txOutTSpend := &wire.TxOut{Value: 16, PkScript: pksTSpendOut}
+
 	// Two generic inputs, one from the regular tx tree one from the stake
 	// tx tree.
 	prevOut1 := &wire.OutPoint{Hash: *txh, Index: 1, Tree: regular}
@@ -106,6 +117,19 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 	// TxIn that spends a ticket submission.
 	prevOutTicketSubmission := &wire.OutPoint{Hash: *txh, Index: 0, Tree: stake}
 	txInTicketSubmission := &wire.TxIn{PreviousOutPoint: *prevOutTicketSubmission}
+
+	// TxIn that spends from the treasury.
+	txInTSpendSigScript := []byte{
+		0:  txscript.OP_DATA_64,
+		65: txscript.OP_DATA_33,
+		66: 0x02,
+		99: byte(txscript.OP_TSPEND),
+	}
+	txInTSpend := wire.NewTxIn(&wire.OutPoint{}, 33, txInTSpendSigScript)
+
+	// TxIn with a null outpoint.
+	nullOutPoint := &wire.OutPoint{Index: math.MaxUint32}
+	txInNullOutpoint := wire.NewTxIn(nullOutPoint, 0, nil)
 
 	// Stakebase input.
 	txInStakebase := &wire.TxIn{
@@ -210,6 +234,39 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 		TxOut: []*wire.TxOut{
 			txOutRevoke,
 			txOutRevoke,
+		},
+	}
+
+	tbase := &wire.MsgTx{
+		Version: 3,
+		TxIn: []*wire.TxIn{
+			txInNullOutpoint, // Coinbase
+		},
+		TxOut: []*wire.TxOut{
+			txOutTBase, // Treasury
+			{PkScript: mustHex("6a0c020000003d45dc9f2d6d6b25")}, // OP_RETURN
+		},
+	}
+
+	tadd := &wire.MsgTx{
+		Version: 3,
+		TxIn: []*wire.TxIn{
+			txIn1,
+		},
+		TxOut: []*wire.TxOut{
+			txOutTBase, // Treasury
+			txOutTicketChange,
+		},
+	}
+
+	tspend := &wire.MsgTx{
+		Version: 3,
+		TxIn: []*wire.TxIn{
+			txInTSpend,
+		},
+		TxOut: []*wire.TxOut{
+			txOutTSpendOptRet, // height OP_RETURN
+			txOutTSpend,       // TSpend Output
 		},
 	}
 
@@ -337,106 +394,173 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 			CoinChange: coinCreated(regularTx.CachedTxHash(), 1),
 		}},
 	}, {
-		name:    "ticket with 2 commitments",
+		name:    "tbase", // Needs to be the first stake tx test case.
 		tree:    stake,
 		txIndex: 0,
 		status:  OpStatusSuccess,
-		tx:      ticket,
+		tx:      tbase,
 		txHash:  txh,
-		ops: []testOp{{ // TxIn[0]
-			Type:       OpTypeDebit,
-			IOIndex:    0,
-			In:         txIn1,
-			Account:    addr1,
-			Amount:     -1,
-			CoinChange: coinSpent(txh, 1),
-		}, { // TxIn[1]
-			Type:       OpTypeDebit,
-			IOIndex:    1,
-			In:         txIn2,
-			Account:    addr2,
-			Amount:     -2,
-			CoinChange: coinSpent(txh, 2),
-		}, { // TxOut[0] - ticket submission
+		ops: []testOp{{ // Treasury
 			Type:       OpTypeCredit,
 			IOIndex:    0,
-			Out:        txOutTicketSubmission,
-			Account:    addrTicketSubmission,
-			Amount:     10,
-			CoinChange: coinCreated(ticket.CachedTxHash(), 0),
-		}, { // TxOut[2] - ticket change
-			Type:       OpTypeCredit,
-			IOIndex:    2,
-			Out:        txOutTicketChange,
-			Account:    addrTicketChange,
-			Amount:     20,
-			CoinChange: coinCreated(ticket.CachedTxHash(), 2),
-		}, { // TxOut[4] - ticket change
-			Type:       OpTypeCredit,
-			IOIndex:    4,
-			Out:        txOutTicketChange,
-			Account:    addrTicketChange,
-			Amount:     20,
-			CoinChange: coinCreated(ticket.CachedTxHash(), 4),
+			Out:        txOutTBase,
+			Account:    TreasuryAccountAdddress,
+			Amount:     15,
+			CoinChange: nil, // Treasury account is not utxo based.
 		}},
-	}, {
-		name:    "vote with 2 rewards",
-		tree:    stake,
-		txIndex: 1,
-		status:  OpStatusSuccess,
-		tx:      vote,
-		txHash:  txh,
-		ops: []testOp{{ // TxIn[1]
-			Type:       OpTypeDebit,
-			IOIndex:    1,
-			In:         txInTicketSubmission,
-			Account:    addrTicketSubmission,
-			Amount:     -10,
-			CoinChange: coinSpent(txh, 0),
-		}, { // TxOut[2] - stakegen
-			Type:       OpTypeCredit,
-			IOIndex:    2,
-			Out:        txOutStakegen,
-			Account:    addrStakegen,
-			Amount:     30,
-			CoinChange: coinCreated(vote.CachedTxHash(), 2),
-		}, { // TxOut[3] - stakegen
-			Type:       OpTypeCredit,
-			IOIndex:    3,
-			Out:        txOutStakegen,
-			Account:    addrStakegen,
-			Amount:     30,
-			CoinChange: coinCreated(vote.CachedTxHash(), 3),
-		}},
-	}, {
-		name:    "revocation with 2 returns",
-		tree:    stake,
-		txIndex: 2,
-		status:  OpStatusSuccess,
-		tx:      revocation,
-		ops: []testOp{{ // TxIn[1]
-			Type:       OpTypeDebit,
-			IOIndex:    0,
-			In:         txInTicketSubmission,
-			Account:    addrTicketSubmission,
-			Amount:     -10,
-			CoinChange: coinSpent(txh, 0),
-		}, { // TxOut[0] - stakrevoke
-			Type:       OpTypeCredit,
-			IOIndex:    0,
-			Out:        txOutRevoke,
-			Account:    addrRevoke,
-			Amount:     9,
-			CoinChange: coinCreated(revocation.CachedTxHash(), 0),
-		}, { // TxOut[1] - stakerevoke
-			Type:       OpTypeCredit,
-			IOIndex:    1,
-			Out:        txOutRevoke,
-			Account:    addrRevoke,
-			Amount:     9,
-			CoinChange: coinCreated(revocation.CachedTxHash(), 1),
-		}},
-	}}
+	},
+		{
+			name:    "ticket with 2 commitments",
+			tree:    stake,
+			txIndex: 0,
+			status:  OpStatusSuccess,
+			tx:      ticket,
+			txHash:  txh,
+			ops: []testOp{{ // TxIn[0]
+				Type:       OpTypeDebit,
+				IOIndex:    0,
+				In:         txIn1,
+				Account:    addr1,
+				Amount:     -1,
+				CoinChange: coinSpent(txh, 1),
+			}, { // TxIn[1]
+				Type:       OpTypeDebit,
+				IOIndex:    1,
+				In:         txIn2,
+				Account:    addr2,
+				Amount:     -2,
+				CoinChange: coinSpent(txh, 2),
+			}, { // TxOut[0] - ticket submission
+				Type:       OpTypeCredit,
+				IOIndex:    0,
+				Out:        txOutTicketSubmission,
+				Account:    addrTicketSubmission,
+				Amount:     10,
+				CoinChange: coinCreated(ticket.CachedTxHash(), 0),
+			}, { // TxOut[2] - ticket change
+				Type:       OpTypeCredit,
+				IOIndex:    2,
+				Out:        txOutTicketChange,
+				Account:    addrTicketChange,
+				Amount:     20,
+				CoinChange: coinCreated(ticket.CachedTxHash(), 2),
+			}, { // TxOut[4] - ticket change
+				Type:       OpTypeCredit,
+				IOIndex:    4,
+				Out:        txOutTicketChange,
+				Account:    addrTicketChange,
+				Amount:     20,
+				CoinChange: coinCreated(ticket.CachedTxHash(), 4),
+			}},
+		}, {
+			name:    "vote with 2 rewards",
+			tree:    stake,
+			txIndex: 1,
+			status:  OpStatusSuccess,
+			tx:      vote,
+			txHash:  txh,
+			ops: []testOp{{ // TxIn[1]
+				Type:       OpTypeDebit,
+				IOIndex:    1,
+				In:         txInTicketSubmission,
+				Account:    addrTicketSubmission,
+				Amount:     -10,
+				CoinChange: coinSpent(txh, 0),
+			}, { // TxOut[2] - stakegen
+				Type:       OpTypeCredit,
+				IOIndex:    2,
+				Out:        txOutStakegen,
+				Account:    addrStakegen,
+				Amount:     30,
+				CoinChange: coinCreated(vote.CachedTxHash(), 2),
+			}, { // TxOut[3] - stakegen
+				Type:       OpTypeCredit,
+				IOIndex:    3,
+				Out:        txOutStakegen,
+				Account:    addrStakegen,
+				Amount:     30,
+				CoinChange: coinCreated(vote.CachedTxHash(), 3),
+			}},
+		}, {
+			name:    "revocation with 2 returns",
+			tree:    stake,
+			txIndex: 2,
+			status:  OpStatusSuccess,
+			tx:      revocation,
+			ops: []testOp{{ // TxIn[1]
+				Type:       OpTypeDebit,
+				IOIndex:    0,
+				In:         txInTicketSubmission,
+				Account:    addrTicketSubmission,
+				Amount:     -10,
+				CoinChange: coinSpent(txh, 0),
+			}, { // TxOut[0] - stakrevoke
+				Type:       OpTypeCredit,
+				IOIndex:    0,
+				Out:        txOutRevoke,
+				Account:    addrRevoke,
+				Amount:     9,
+				CoinChange: coinCreated(revocation.CachedTxHash(), 0),
+			}, { // TxOut[1] - stakerevoke
+				Type:       OpTypeCredit,
+				IOIndex:    1,
+				Out:        txOutRevoke,
+				Account:    addrRevoke,
+				Amount:     9,
+				CoinChange: coinCreated(revocation.CachedTxHash(), 1),
+			}},
+		}, {
+			name:    "tadd",
+			tree:    stake,
+			txIndex: 1,
+			status:  OpStatusSuccess,
+			tx:      tadd,
+			txHash:  txh,
+			ops: []testOp{{ // TxIn[0]
+				Type:       OpTypeDebit,
+				IOIndex:    0,
+				In:         txIn1,
+				Account:    addr1,
+				Amount:     -1,
+				CoinChange: coinSpent(txh, 1),
+			}, { // Treasury output
+				Type:       OpTypeCredit,
+				IOIndex:    0,
+				Out:        txOutTBase,
+				Account:    TreasuryAccountAdddress,
+				Amount:     15,
+				CoinChange: nil, // Treasury account is not utxo based.
+			}, { // Change
+				Type:       OpTypeCredit,
+				IOIndex:    1,
+				Out:        txOutTicketChange,
+				Account:    addrTicketChange,
+				Amount:     20,
+				CoinChange: coinCreated(tadd.CachedTxHash(), 1),
+			}},
+		}, {
+			name:    "tspend",
+			tree:    stake,
+			txIndex: 1,
+			status:  OpStatusSuccess,
+			tx:      tspend,
+			txHash:  txh,
+			ops: []testOp{{ // TxIn[0]
+				Type:       OpTypeDebit,
+				IOIndex:    0,
+				In:         txInTSpend,
+				Account:    TreasuryAccountAdddress,
+				Amount:     -33,
+				CoinChange: nil, // Treasury account is not utxo based.
+			}, { // TSpend output
+				Type:       OpTypeCredit,
+				IOIndex:    1,
+				Out:        txOutTSpend,
+				Account:    addr1,
+				Amount:     16,
+				CoinChange: coinCreated(tspend.CachedTxHash(), 1),
+			}},
+		}}
 
 	return &txToRosettaTestCtx{
 		testCases:   testCases,
@@ -500,6 +624,11 @@ func assertTestCaseOpsMatch(t *testing.T, txi, opi int, status OpStatus,
 	if wantNilCC != gotNilCC {
 		t.Fatalf("tx %d op %d unexpected coinchage. want=%v got=%v",
 			txi, opi, wantNilCC, gotNilCC)
+	}
+
+	if wantNilCC {
+		// Nothing else to check as CoinChange is nil as expected.
+		return
 	}
 
 	if wantCC.CoinIdentifier.Identifier != gotCC.CoinIdentifier.Identifier {
@@ -752,6 +881,7 @@ func TestBlockToRosetta(t *testing.T) {
 // transaction works.
 func TestMempoolTxToRosetta(t *testing.T) {
 	regular := wire.TxTreeRegular
+	stake := wire.TxTreeStake
 	tctx := txToRosettaTestCases()
 
 	for tci, tc := range tctx.testCases {
@@ -763,6 +893,11 @@ func TestMempoolTxToRosetta(t *testing.T) {
 
 		// Skip coinbase since it's never found in the mempool.
 		if tc.tree == regular && tc.txIndex == 0 {
+			continue
+		}
+
+		// Skip treasurybase since it's never found in the mempool.
+		if tc.tree == stake && tc.txIndex == 0 {
 			continue
 		}
 

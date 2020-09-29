@@ -16,6 +16,10 @@ import (
 	"github.com/decred/dcrd/txscript/v3"
 )
 
+// TreasuryAccountAddress is the address used to represent the special treasury
+// account.
+const TreasuryAccountAdddress = "*treasury"
+
 // pkScriptToRawAccountAddr converts a given PkScript byte slice into a "raw"
 // dcrros address. A raw address is an hex-encoded string with the following
 // format 0x[2-byte-version][pktscript]

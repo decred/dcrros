@@ -82,12 +82,13 @@ func (op *Op) ROp() *rtypes.Operation {
 			coinAction = rtypes.CoinCreated
 		}
 
-		// TODO: support tspend input (doesn't spend coins).
-		coinChange = &rtypes.CoinChange{
-			CoinAction: coinAction,
-			CoinIdentifier: &rtypes.CoinIdentifier{
-				Identifier: op.In.PreviousOutPoint.String(),
-			},
+		if op.Account != TreasuryAccountAdddress {
+			coinChange = &rtypes.CoinChange{
+				CoinAction: coinAction,
+				CoinIdentifier: &rtypes.CoinIdentifier{
+					Identifier: op.In.PreviousOutPoint.String(),
+				},
+			}
 		}
 	} else {
 		meta = map[string]interface{}{
@@ -106,11 +107,13 @@ func (op *Op) ROp() *rtypes.Operation {
 			coinAction = rtypes.CoinSpent
 		}
 
-		coinChange = &rtypes.CoinChange{
-			CoinAction: coinAction,
-			CoinIdentifier: &rtypes.CoinIdentifier{
-				Identifier: outp.String(),
-			},
+		if op.Account != TreasuryAccountAdddress {
+			coinChange = &rtypes.CoinChange{
+				CoinAction: coinAction,
+				CoinIdentifier: &rtypes.CoinIdentifier{
+					Identifier: outp.String(),
+				},
+			}
 		}
 	}
 
@@ -147,18 +150,19 @@ func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpC
 	chainParams *chaincfg.Params) error {
 
 	tx := op.Tx
-	isVote := op.Tree == wire.TxTreeStake && stake.IsSSGen(tx, true)
-	isCoinbase := op.Tree == wire.TxTreeRegular && op.TxIndex == 0
+	isStake := op.Tree == wire.TxTreeStake
+	txType := stake.DetermineTxType(tx, true)
+	isVote := txType == stake.TxTypeSSGen
+	isCoinbase := !isStake && txType == stake.TxTypeRegular && op.TxIndex == 0
 
-	// TODO: Use dcrd's stake.IsTreasuryBase once published instead of this
-	// hack.
-	isTicket := op.Tree == wire.TxTreeStake && !isVote && stake.IsSStx(tx)
-	isTreasuryBase := op.Tree == wire.TxTreeStake && op.TxIndex == 0 && !isVote && !isTicket
+	isTBase := isStake && txType == stake.TxTypeTreasuryBase && op.TxIndex == 0
+	isTAdd := isStake && txType == stake.TxTypeTAdd
+	isTSpend := isStake && txType == stake.TxTypeTSpend
 
 	// Fetch the relevant data for the inputs.
 	prevOutpoints := make([]*wire.OutPoint, 0, len(tx.TxIn))
 	for i, in := range tx.TxIn {
-		if i == 0 && (isVote || isCoinbase || isTreasuryBase) {
+		if i == 0 && (isVote || isCoinbase || isTBase || isTSpend) {
 			// Coinbases don't have an input with i > 0 so this is
 			// safe.
 			continue
@@ -178,33 +182,44 @@ func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpC
 		op.Out = nil
 
 		for i, in := range tx.TxIn {
-			if i == 0 && (isVote || isCoinbase || isTreasuryBase) {
+			if i == 0 && (isVote || isCoinbase || isTBase) {
 				// Coinbases don't have an input with i > 0.
 				continue
 			}
 
-			op.PrevInput, ok = prevInputs[in.PreviousOutPoint]
-			if !ok {
-				return fmt.Errorf("missing prev outpoint %s", in.PreviousOutPoint)
-			}
+			if isTSpend {
+				// For tspends, the first input debits from the
+				// treasury account and there's no PrevInput.
+				op.PrevInput = nil
+				op.AccountVersion = 0
+				op.Account = TreasuryAccountAdddress
+				op.Amount = -dcrutil.Amount(in.ValueIn)
+			} else {
+				// Handle standard inputs.
+				op.PrevInput, ok = prevInputs[in.PreviousOutPoint]
+				if !ok {
+					return fmt.Errorf("missing prev outpoint %s", in.PreviousOutPoint)
+				}
 
-			op.AccountVersion = op.PrevInput.Version
-			op.Account, err = dcrPkScriptToAccountAddr(op.PrevInput.Version,
-				op.PrevInput.PkScript, chainParams)
-			if err != nil {
-				return err
-			}
-			if op.Account == "" {
-				// Might happen for OP_RETURNs, ticket
-				// commitments, etc.
-				continue
+				op.AccountVersion = op.PrevInput.Version
+				op.Account, err = dcrPkScriptToAccountAddr(op.PrevInput.Version,
+					op.PrevInput.PkScript, chainParams)
+				if err != nil {
+					return err
+				}
+				if op.Account == "" {
+					// Might happen for OP_RETURNs, ticket
+					// commitments, etc.
+					continue
+				}
+
+				op.Amount = -op.PrevInput.Amount
 			}
 
 			// Fill in op input data.
 			op.IOIndex = i
 			op.In = in
 			op.Type = OpTypeDebit
-			op.Amount = -op.PrevInput.Amount
 			if op.Status == OpStatusReversed {
 				op.Amount *= -1
 			}
@@ -236,13 +251,21 @@ func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpC
 			}
 
 			op.AccountVersion = out.Version
-			op.Account, err = dcrPkScriptToAccountAddr(out.Version,
-				out.PkScript, chainParams)
-			if err != nil {
-				return err
-			}
-			if op.Account == "" {
-				continue
+
+			if (isTAdd || isTBase) && i == 0 {
+				// The first output in TAdds and treasury bases
+				// credit the treasury account.
+				op.Account = TreasuryAccountAdddress
+			} else {
+				// Handle standard outputs.
+				op.Account, err = dcrPkScriptToAccountAddr(out.Version,
+					out.PkScript, chainParams)
+				if err != nil {
+					return err
+				}
+				if op.Account == "" {
+					continue
+				}
 			}
 
 			// Fill in op output data.
