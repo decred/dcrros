@@ -1,11 +1,11 @@
 # Decred/Rosetta middleware service
 
 [![ISC License](https://img.shields.io/badge/license-ISC-blue.svg)](http://copyfree.org)
-[![ISC License](https://img.shields.io/badge/rosetta-1.4.0-blue.svg)](https://rosetta-api.org)
+[![ISC License](https://img.shields.io/badge/rosetta-1.4.4-blue.svg)](https://rosetta-api.org)
 
 `dcrros` (Decred/Rosetta) is a middleware service that provides access to the [Decred](https://www.decred.org) network via a [Rosetta-compatible](https://rosetta-api.org) API.
 
-This version is currently compatible to Rosetta version **1.4.0**.
+This version is currently compatible to Rosetta version **1.4.4**.
 
 `dcrros` works as an API conversion layer and cache for the data required by Rosetta implementations. It requires a running `dcrd` node to use for authoritative blockchain data. For technical information about the mapping between Decred and Rosetta concepts, please see the [mapping](/docs/mapping.md) document.
 
@@ -20,10 +20,10 @@ $ docker build --tag dcrros:stable https://raw.githubusercontent.com/decred/dcrr
 $ docker run --rm -p 9128:9128/tcp dcrros:stable
 ```
 
-If the port of the `dcrros` service is exposed (like in the previous command), the [rosetta-cli](https://github.com/coinbase/rosetta-cli) tool can be used to perform some simple checks on the service, such as:
+If the port of the `dcrros` service is exposed (like in the previous command), the [rosetta-cli](https://github.com/coinbase/rosetta-cli) tool can be used to perform some simple checks on the service, such as (note the use of an appropriate `--configuration-file`):
 
 ```shell
-$ rosetta-cli --server-url http://localhost:9128 view:block 0
+$ rosetta-cli --configuration-file docs/roscli-mainnet.json view:block 0
 ```
  
 For additional configuration options, including how to run on the test network, please see the [Docker Options](/docs/docker.md) document.
