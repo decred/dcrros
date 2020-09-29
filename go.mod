@@ -8,7 +8,7 @@ require (
 	github.com/decred/dcrd/chaincfg/chainhash v1.0.2
 	github.com/decred/dcrd/chaincfg/v3 v3.0.0-20200215031403-6b2ce76f0986
 	github.com/decred/dcrd/dcrec v1.0.0
-	github.com/decred/dcrd/dcrec/secp256k1/v3 v3.0.0-20200616182840-3baf1f590cb1 // indirect
+	github.com/decred/dcrd/dcrec/secp256k1/v3 v3.0.0-20200616182840-3baf1f590cb1
 	github.com/decred/dcrd/dcrjson/v3 v3.0.1
 	github.com/decred/dcrd/dcrutil/v3 v3.0.0-20200616182840-3baf1f590cb1
 	github.com/decred/dcrd/lru v1.0.1-0.20200219013519-e26e71a9a21f

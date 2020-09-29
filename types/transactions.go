@@ -14,6 +14,8 @@ import (
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/dcrd/dcrutil/v3"
 	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
@@ -351,10 +353,6 @@ func ExtractSignPayloads(ops []*rtypes.Operation, tx *wire.MsgTx,
 
 func extractInputSigner(op *rtypes.Operation, tx *wire.MsgTx, idx int,
 	chainParams *chaincfg.Params) (*rtypes.AccountIdentifier, error) {
-	if idx >= len(tx.TxIn) {
-		return nil, fmt.Errorf("trying to sign inexistent input %d", idx)
-	}
-
 	if op.Account == nil {
 		return nil, fmt.Errorf("nil account")
 	}
@@ -389,7 +387,7 @@ func extractInputSigner(op *rtypes.Operation, tx *wire.MsgTx, idx int,
 func ExtractTxSigners(ops []*rtypes.Operation, tx *wire.MsgTx,
 	chainParams *chaincfg.Params) ([]*rtypes.AccountIdentifier, error) {
 
-	signers := make([]*rtypes.AccountIdentifier, 0, len(tx.TxIn))
+	var signers []*rtypes.AccountIdentifier
 
 	var inIdx int
 	for i, op := range ops {
@@ -398,19 +396,27 @@ func ExtractTxSigners(ops []*rtypes.Operation, tx *wire.MsgTx,
 			continue
 		}
 
-		signer, err := extractInputSigner(op, tx, inIdx, chainParams)
-		if err != nil {
-			return nil, ErrInvalidOp.Msgf("error extracting "+
-				"input signer for op %d: %v", i, err)
-
+		if inIdx >= len(tx.TxIn) {
+			return nil, fmt.Errorf("debit without corresponding input %d", inIdx)
 		}
+
+		// Only extract signer for signed inputs.
+		if len(tx.TxIn[inIdx].SignatureScript) > 0 {
+			signer, err := extractInputSigner(op, tx, inIdx, chainParams)
+			if err != nil {
+				return nil, ErrInvalidOp.Msgf("error extracting "+
+					"input signer for op %d: %v", i, err)
+
+			}
+
+			// Some inputs are valid but we don't know how to produce a
+			// SigningPayload for, so we just skip those.
+			if signer != nil {
+				signers = append(signers, signer)
+			}
+		}
+
 		inIdx++
-
-		// Some inputs are valid but we don't know how to produce a
-		// SigningPayload for, so we just skip those.
-		if signer != nil {
-			signers = append(signers, signer)
-		}
 	}
 
 	return signers, nil
@@ -432,19 +438,33 @@ func CombineTxSigs(sigs []*rtypes.Signature, tx *wire.MsgTx,
 	for i, sig := range sigs {
 		var sigScript []byte
 
+		if sig.PublicKey.CurveType != rtypes.Secp256k1 {
+			return ErrUnsupportedCurveType
+		}
+
 		switch sig.SignatureType {
 		case rtypes.Ecdsa:
-			// Make a copy of the sigScript so we can tack in the
-			// sig hash type at the end.
-			rs := make([]byte, len(sig.Bytes)+1)
-			copy(rs[:], sig.Bytes)
-			rs[len(rs)-1] = byte(sigHashType)
+			if len(sig.Bytes) != 64 {
+				return ErrIncorrectSigSize.Msg("Ecdsa signatures need to be 64 bytes long")
+			}
+
+			// ECDSA mode returns a sig in compact format (32-byte R + 32-byte S), so
+			// decode into an ecdsa.Signature type and re-serialize as a DER
+			// signature.
+			var r, s secp256k1.ModNScalar
+			r.SetByteSlice(sig.Bytes[:32])
+			s.SetByteSlice(sig.Bytes[32:])
+			ecdsaSig := ecdsa.NewSignature(&r, &s)
+			derSig := ecdsaSig.Serialize()
+
+			// Add the sighash type after the sig.
+			derSig = append(derSig, byte(sigHashType))
 
 			// For ecdsa, we only support signing standard version
 			// 0 P2PKH scripts, so build the appropriate signature
 			// script.
 			var b txscript.ScriptBuilder
-			b.AddData(rs)
+			b.AddData(derSig)
 			b.AddData(sig.PublicKey.Bytes)
 			var err error
 			sigScript, err = b.Script()

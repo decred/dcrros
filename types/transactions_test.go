@@ -8,6 +8,8 @@ import (
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/dcrd/dcrutil/v3"
 	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
@@ -223,7 +225,7 @@ func rosToTxTestCases() *rosToTxTestContext {
 			},
 			ValueIn: 20,
 		},
-		signer: "RcaJVhnU11HaKVy95dGaPRMRSSWrb3KK2u1",
+		signer: "",
 	}, {
 		op: &rtypes.Operation{
 			Type:   "credit",
@@ -423,32 +425,72 @@ func TestExtractSignPayloads(t *testing.T) {
 	}
 }
 
+func sigFromBytes(bt []byte) *ecdsa.Signature {
+	var r, s secp256k1.ModNScalar
+	r.SetByteSlice(bt[:32])
+	s.SetByteSlice(bt[32:])
+	return ecdsa.NewSignature(&r, &s)
+}
+
+func mustParsePubKey(s string) *secp256k1.PublicKey {
+	pk, err := secp256k1.ParsePubKey(mustHex(s))
+	if err != nil {
+		panic(err)
+	}
+	return pk
+}
+
+func appendMany(slices ...[]byte) []byte {
+	var size, offset int
+	for _, s := range slices {
+		size += len(s)
+	}
+	res := make([]byte, size)
+	for _, s := range slices {
+		offset += copy(res[offset:], s)
+	}
+	return res
+}
+
 // TestCombineSigs tests the function that combines signatures to an unsinged
 // transaction.
 func TestCombineSigs(t *testing.T) {
 	chainParams := chaincfg.RegNetParams()
 
-	pk1 := mustHex("ff00934685fb")
-	pk2 := mustHex("ff004685fbfa")
-	sig1 := mustHex("ee00fbfaab00")
-	sig2 := mustHex("ee00faab9200")
+	pk1 := mustParsePubKey("03fcff622d4202a17c2b4c8738b1339fb23bfcd923fc83fce59e119d49325aa5a5")
+	pk2 := mustParsePubKey("024134138277e4aa88ab3e08cc72310f3bad4e47eb042dd6551b0930dd89966107")
+	pk1Bytes := pk1.SerializeCompressed()
+	pk2Bytes := pk2.SerializeCompressed()
+
+	sigBytes1 := bytes.Repeat([]byte{0xca}, 64)
+	sigBytes2 := bytes.Repeat([]byte{0x1b}, 64)
+	sig1 := sigFromBytes(sigBytes1)
+	sig2 := sigFromBytes(sigBytes2)
+	sigDer1 := sig1.Serialize()
+	sigDer2 := sig2.Serialize()
+	sigDer1Len := []byte{byte(txscript.OP_DATA_1 + len(sigDer1))}
+	sigDer2Len := []byte{byte(txscript.OP_DATA_1 + len(sigDer2))}
+	sigHashAll := []byte{byte(txscript.SigHashAll)}
+	opData33 := []byte{byte(txscript.OP_DATA_33)}
 	sigScripts := [][]byte{
-		mustHex("07ee00fbfaab000106ff00934685fb"),
-		mustHex("07ee00fbfaab000106ff00934685fb"),
+		appendMany(sigDer1Len, sigDer1, sigHashAll, opData33, pk1Bytes),
+		appendMany(sigDer2Len, sigDer2, sigHashAll, opData33, pk2Bytes),
 	}
 
 	sigs := []*rtypes.Signature{{
 		PublicKey: &rtypes.PublicKey{
-			Bytes: pk1,
+			Bytes:     pk1Bytes,
+			CurveType: rtypes.Secp256k1,
 		},
 		SignatureType: rtypes.Ecdsa,
-		Bytes:         sig1,
+		Bytes:         sigBytes1,
 	}, {
 		PublicKey: &rtypes.PublicKey{
-			Bytes: pk2,
+			Bytes:     pk2Bytes,
+			CurveType: rtypes.Secp256k1,
 		},
 		SignatureType: rtypes.Ecdsa,
-		Bytes:         sig2,
+		Bytes:         sigBytes2,
 	}}
 
 	// First test: everything correct.
@@ -464,7 +506,7 @@ func TestCombineSigs(t *testing.T) {
 
 		for i := range sigs {
 			wantSigScript := sigScripts[i]
-			if !bytes.Equal(wantSigScript, tx.TxIn[0].SignatureScript) {
+			if !bytes.Equal(wantSigScript, tx.TxIn[i].SignatureScript) {
 				t.Fatalf("sig %d unexpected sigscript. want=%x "+
 					"got=%x", i, wantSigScript, tx.TxIn[0].SignatureScript)
 			}
@@ -510,6 +552,23 @@ func TestCombineSigs(t *testing.T) {
 
 		err := CombineTxSigs(sigs, tx, chainParams)
 		if !errors.Is(err, ErrUnsupportedSignatureType) {
+			t.Fatalf("unexpected error: want=%v got=%v",
+				ErrIncorrectSigCount, err)
+		}
+
+	})
+
+	// Fifht test: unsupported curve type
+	t.Run("unsupported curve", func(t *testing.T) {
+		tx := wire.NewMsgTx()
+		tx.AddTxIn(&wire.TxIn{})
+		tx.AddTxIn(&wire.TxIn{})
+
+		sigs[1].SignatureType = rtypes.Ecdsa
+		sigs[1].PublicKey.CurveType = rtypes.Secp256r1
+
+		err := CombineTxSigs(sigs, tx, chainParams)
+		if !errors.Is(err, ErrUnsupportedCurveType) {
 			t.Fatalf("unexpected error: want=%v got=%v",
 				ErrIncorrectSigCount, err)
 		}

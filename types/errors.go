@@ -55,6 +55,7 @@ const (
 	ErrUnsupportedSignatureType
 	ErrSerializeSizeUnspecified
 	ErrSerSizeNotNumber
+	ErrIncorrectSigSize
 
 	// This MUST be the last member.
 	nbErrorCodes
@@ -90,6 +91,7 @@ var errorCodeMsgs = map[ErrorCode]string{
 	ErrUnsupportedSignatureType:  "unsupported signature type",
 	ErrSerializeSizeUnspecified:  "serialize_size was not specified",
 	ErrSerSizeNotNumber:          "serialize_size is not a number",
+	ErrIncorrectSigSize:          "incorrect signature size",
 }
 
 // Error returns the default error message for the given error code.
