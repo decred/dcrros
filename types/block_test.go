@@ -1,6 +1,7 @@
 package types
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
@@ -12,12 +13,13 @@ import (
 )
 
 type testOp struct {
-	Type    OpType
-	IOIndex int
-	Out     *wire.TxOut
-	Account string
-	Amount  dcrutil.Amount
-	In      *wire.TxIn
+	Type       OpType
+	IOIndex    int
+	Out        *wire.TxOut
+	Account    string
+	Amount     dcrutil.Amount
+	In         *wire.TxIn
+	CoinChange *rtypes.CoinChange
 }
 
 type txToRosettaTestCase struct {
@@ -131,6 +133,24 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 		}, nil
 	}
 
+	// Aux closures to create CoinChange structures.
+	coinCreated := func(txh chainhash.Hash, index int) *rtypes.CoinChange {
+		return &rtypes.CoinChange{
+			CoinIdentifier: &rtypes.CoinIdentifier{
+				Identifier: fmt.Sprintf("%s:%d", txh, index),
+			},
+			CoinAction: rtypes.CoinCreated,
+		}
+	}
+	coinSpent := func(txh chainhash.Hash, index int) *rtypes.CoinChange {
+		return &rtypes.CoinChange{
+			CoinIdentifier: &rtypes.CoinIdentifier{
+				Identifier: fmt.Sprintf("%s:%d", txh, index),
+			},
+			CoinAction: rtypes.CoinSpent,
+		}
+	}
+
 	// Each test case lists the op values that need to be configured prior
 	// to calling iterateBlockOpsInTx, the Decred tx and the expected
 	// resulting list of Rosetta operations.
@@ -155,17 +175,19 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 		},
 		txHash: txh,
 		ops: []testOp{{ // Treasury
-			Type:    OpTypeCredit,
-			IOIndex: 0,
-			Out:     txOut1,
-			Account: addr1,
-			Amount:  -1,
+			Type:       OpTypeCredit,
+			IOIndex:    0,
+			Out:        txOut1,
+			Account:    addr1,
+			Amount:     -1,
+			CoinChange: coinSpent(txh, 0),
 		}, { // PoW reward
-			Type:    OpTypeCredit,
-			IOIndex: 2,
-			Out:     txOut2,
-			Account: addr2,
-			Amount:  -2,
+			Type:       OpTypeCredit,
+			IOIndex:    2,
+			Out:        txOut2,
+			Account:    addr2,
+			Amount:     -2,
+			CoinChange: coinSpent(txh, 2),
 		}},
 	}, {
 		name:    "reversed standard regular tx",
@@ -225,17 +247,19 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 		},
 		txHash: txh,
 		ops: []testOp{{ // Treasury
-			Type:    OpTypeCredit,
-			IOIndex: 0,
-			Out:     txOut1,
-			Account: addr1,
-			Amount:  1,
+			Type:       OpTypeCredit,
+			IOIndex:    0,
+			Out:        txOut1,
+			Account:    addr1,
+			Amount:     1,
+			CoinChange: coinCreated(txh, 0),
 		}, { // PoW reward
-			Type:    OpTypeCredit,
-			IOIndex: 2,
-			Out:     txOut2,
-			Account: addr2,
-			Amount:  2,
+			Type:       OpTypeCredit,
+			IOIndex:    2,
+			Out:        txOut2,
+			Account:    addr2,
+			Amount:     2,
+			CoinChange: coinCreated(txh, 2),
 		}},
 	}, {
 		name:    "standard regular tx",

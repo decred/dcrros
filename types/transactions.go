@@ -6,7 +6,9 @@ package types
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
@@ -21,10 +23,42 @@ import (
 // the moment. This MUST be SigHashAll.
 const sigHashType = txscript.SigHashAll
 
+type errKeyNotFound string
+
+func (e errKeyNotFound) Error() string {
+	return fmt.Sprintf("key %s does not exist", string(e))
+}
+
+// decodeOutPoint deserializes the given string into an outpoint.
+func decodeOutPoint(s string) (wire.OutPoint, error) {
+	split := strings.Split(s, ":")
+	var out wire.OutPoint
+	if len(split) != 2 {
+		return out, fmt.Errorf("string does not have outpoint format '<hex>:<index>''")
+	}
+
+	if len(split[0]) != 64 {
+		return out, fmt.Errorf("hex part of outpoint does not encode 32 bytes")
+	}
+
+	if err := chainhash.Decode(&out.Hash, split[0]); err != nil {
+		return out, fmt.Errorf("invalid hash at start of outpoint string")
+	}
+
+	idx, err := strconv.ParseUint(split[1], 10, 32)
+	if err != nil {
+		return out, fmt.Errorf("invalid int at end of outpoint string")
+	}
+
+	out.Index = uint32(idx)
+
+	return out, nil
+}
+
 func metadataInt8(m map[string]interface{}, k string, i *int8) error {
 	v, ok := m[k]
 	if !ok {
-		return fmt.Errorf("key %s does not exist", k)
+		return errKeyNotFound(k)
 	}
 
 	switch v := v.(type) {
@@ -48,7 +82,7 @@ func metadataInt8(m map[string]interface{}, k string, i *int8) error {
 func metadataUint16(m map[string]interface{}, k string, i *uint16) error {
 	v, ok := m[k]
 	if !ok {
-		return fmt.Errorf("key %s does not exist", k)
+		return errKeyNotFound(k)
 	}
 
 	switch v := v.(type) {
@@ -72,7 +106,7 @@ func metadataUint16(m map[string]interface{}, k string, i *uint16) error {
 func metadataUint32(m map[string]interface{}, k string, i *uint32) error {
 	v, ok := m[k]
 	if !ok {
-		return fmt.Errorf("key %s does not exist", k)
+		return errKeyNotFound(k)
 	}
 
 	switch v := v.(type) {
@@ -93,25 +127,10 @@ func metadataUint32(m map[string]interface{}, k string, i *uint32) error {
 	return nil
 }
 
-func metadataChainHash(m map[string]interface{}, k string, h *chainhash.Hash) error {
-	v, ok := m[k]
-	if !ok {
-		return fmt.Errorf("key %s does not exist", k)
-	}
-
-	switch v := v.(type) {
-	case string:
-		return chainhash.Decode(h, v)
-
-	default:
-		return fmt.Errorf("unconvertable type %T to chainhash.Hash", v)
-	}
-}
-
 func metadataHex(m map[string]interface{}, k string, b *[]byte) error {
 	v, ok := m[k]
 	if !ok {
-		return fmt.Errorf("key %s does not exist", k)
+		return errKeyNotFound(k)
 	}
 
 	switch v := v.(type) {
@@ -141,35 +160,39 @@ func rosettaOpToTx(op *rtypes.Operation, tx *wire.MsgTx, chainParams *chaincfg.P
 	case OpTypeDebit:
 		var prevOut wire.OutPoint
 
-		if err := metadataChainHash(m, "prev_hash", &prevOut.Hash); err != nil {
-			return fmt.Errorf("unable to decode prev_hash: %v", err)
+		// Debits require an originating coins_spent CoinChange so we can fill
+		// PrevousOutPoint.
+		if op.CoinChange == nil {
+			return fmt.Errorf("debit operation needs to have a filled coin_change")
 		}
-		if err := metadataUint32(m, "prev_index", &prevOut.Index); err != nil {
-			return fmt.Errorf("unable to decode prev_index: %v", err)
+		if op.CoinChange.CoinIdentifier == nil {
+			return fmt.Errorf("debit operation needs to have a filled coin_change.coin_identifier")
 		}
-		if err := metadataInt8(m, "prev_tree", &prevOut.Tree); err != nil {
+		if op.CoinChange.CoinAction != rtypes.CoinSpent {
+			return fmt.Errorf("debit operation needs a coin_spent coin_action")
+		}
+		if prevOut, err = decodeOutPoint(op.CoinChange.CoinIdentifier.Identifier); err != nil {
+			return fmt.Errorf("unable to decode outpoint: %v", err)
+		}
+
+		// Ignore if prev_tree is not found (defaults to regular tree).
+		if err := metadataInt8(m, "prev_tree", &prevOut.Tree); err != nil && !errors.Is(err, errKeyNotFound("prev_tree")) {
 			return fmt.Errorf("unable to decode prev_tree: %v", err)
 		}
 
-		in := &wire.TxIn{
-			PreviousOutPoint: prevOut,
-			ValueIn:          int64(opAmt),
-		}
+		in := wire.NewTxIn(&prevOut, int64(opAmt), nil)
 
-		if err := metadataUint32(m, "sequence", &in.Sequence); err != nil {
+		if err := metadataUint32(m, "sequence", &in.Sequence); err != nil && !errors.Is(err, errKeyNotFound("sequence")) {
 			return fmt.Errorf("unable to decode sequence: %v", err)
 		}
-		if err := metadataUint32(m, "block_height", &in.BlockHeight); err != nil {
+		if err := metadataUint32(m, "block_height", &in.BlockHeight); err != nil && !errors.Is(err, errKeyNotFound("block_height")) {
 			return fmt.Errorf("unable to decode block_height: %v", err)
 		}
-		if err := metadataUint32(m, "block_index", &in.BlockIndex); err != nil {
+		if err := metadataUint32(m, "block_index", &in.BlockIndex); err != nil && !errors.Is(err, errKeyNotFound("block_index")) {
 			return fmt.Errorf("unable to decode block_index: %v", err)
 		}
-		if _, ok := m["signature_script"]; ok {
-			// Optional since this might be an unsigned tx.
-			if err := metadataHex(m, "signature_script", &in.SignatureScript); err != nil {
-				return fmt.Errorf("unable to decode signatureScript: %v", err)
-			}
+		if err := metadataHex(m, "signature_script", &in.SignatureScript); err != nil && !errors.Is(err, errKeyNotFound("signature_script")) {
+			return fmt.Errorf("unable to decode signatureScript: %v", err)
 		}
 		tx.TxIn = append(tx.TxIn, in)
 	case OpTypeCredit:
@@ -201,13 +224,16 @@ func rosettaOpToTx(op *rtypes.Operation, tx *wire.MsgTx, chainParams *chaincfg.P
 // depending on the content of the operations.
 func RosettaOpsToTx(txMeta map[string]interface{}, ops []*rtypes.Operation, chainParams *chaincfg.Params) (*wire.MsgTx, error) {
 	tx := &wire.MsgTx{}
-	if err := metadataUint16(txMeta, "version", &tx.Version); err != nil {
+
+	// We ignore errKeyNotFound in the next ones so that the tx defaults to the
+	// standard ones.
+	if err := metadataUint16(txMeta, "version", &tx.Version); err != nil && !errors.Is(err, errKeyNotFound("version")) {
 		return nil, ErrInvalidTxMetadata.Msgf("unable to decode tx version: %v", err)
 	}
-	if err := metadataUint32(txMeta, "expiry", &tx.Expiry); err != nil {
+	if err := metadataUint32(txMeta, "expiry", &tx.Expiry); err != nil && !errors.Is(err, errKeyNotFound("expiry")) {
 		return nil, ErrInvalidTxMetadata.Msgf("unable to decode expiry: %v", err)
 	}
-	if err := metadataUint32(txMeta, "locktime", &tx.LockTime); err != nil {
+	if err := metadataUint32(txMeta, "locktime", &tx.LockTime); err != nil && !errors.Is(err, errKeyNotFound("locktime")) {
 		return nil, ErrInvalidTxMetadata.Msgf("unable to decode locktime: %v", err)
 	}
 

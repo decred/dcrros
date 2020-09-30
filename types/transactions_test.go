@@ -120,8 +120,6 @@ func rosToTxTestCases() *rosToTxTestContext {
 			Type:   "debit",
 			Amount: amt(10),
 			Metadata: map[string]interface{}{
-				"prev_hash":        prevHash1,
-				"prev_index":       uint32(1),
 				"prev_tree":        int8(1),
 				"sequence":         uint32(1000),
 				"block_height":     uint32(2000),
@@ -135,6 +133,13 @@ func rosToTxTestCases() *rosToTxTestContext {
 				Metadata: map[string]interface{}{
 					"script_version": uint16(0),
 				},
+			},
+
+			CoinChange: &rtypes.CoinChange{
+				CoinIdentifier: &rtypes.CoinIdentifier{
+					Identifier: prevHash1 + ":1",
+				},
+				CoinAction: rtypes.CoinSpent,
 			},
 		},
 		in: &wire.TxIn{
@@ -155,8 +160,6 @@ func rosToTxTestCases() *rosToTxTestContext {
 			Type:   "debit",
 			Amount: amt(30),
 			Metadata: map[string]interface{}{
-				"prev_hash":    prevHash1,
-				"prev_index":   uint32(0),
 				"prev_tree":    int8(0),
 				"sequence":     uint32(0),
 				"block_height": uint32(0),
@@ -173,6 +176,13 @@ func rosToTxTestCases() *rosToTxTestContext {
 					"script_version": uint16(1),
 				},
 			},
+
+			CoinChange: &rtypes.CoinChange{
+				CoinIdentifier: &rtypes.CoinIdentifier{
+					Identifier: prevHash1 + ":0",
+				},
+				CoinAction: rtypes.CoinSpent,
+			},
 		},
 		in: &wire.TxIn{
 			PreviousOutPoint: wire.OutPoint{
@@ -186,8 +196,6 @@ func rosToTxTestCases() *rosToTxTestContext {
 			Type:   "debit",
 			Amount: amt(20),
 			Metadata: map[string]interface{}{
-				"prev_hash":    prevHash1,
-				"prev_index":   uint32(0),
 				"prev_tree":    int8(0),
 				"sequence":     uint32(0),
 				"block_height": uint32(0),
@@ -200,6 +208,13 @@ func rosToTxTestCases() *rosToTxTestContext {
 				Metadata: map[string]interface{}{
 					"script_version": uint16(0),
 				},
+			},
+
+			CoinChange: &rtypes.CoinChange{
+				CoinIdentifier: &rtypes.CoinIdentifier{
+					Identifier: prevHash1 + ":0",
+				},
+				CoinAction: rtypes.CoinSpent,
 			},
 		},
 		in: &wire.TxIn{
@@ -221,6 +236,13 @@ func rosToTxTestCases() *rosToTxTestContext {
 				Metadata: map[string]interface{}{
 					"script_version": uint16(0),
 				},
+			},
+
+			CoinChange: &rtypes.CoinChange{
+				CoinIdentifier: &rtypes.CoinIdentifier{
+					Identifier: "xxxxx:0",
+				},
+				CoinAction: rtypes.CoinCreated,
 			},
 		},
 		out: &wire.TxOut{
