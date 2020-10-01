@@ -28,6 +28,11 @@
     "inactive_discrepency_search_disabled": false,
     "balance_tracking_disabled": false,
     "coin_tracking_disabled": false,
-    "results_output_file": ""
+    "results_output_file": "",
+    "historical_balance_enabled": true,
+    "end_conditions": {
+      "tip": true,
+      "reconciliation_coverage": 1.0
+    }
   }
 }

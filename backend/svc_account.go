@@ -186,11 +186,13 @@ func (s *Server) AccountBalance(ctx context.Context, req *rtypes.AccountBalanceR
 		return nil, types.ErrInvalidArgument.RError()
 	}
 
-	// Decode the relevant account(=address).
 	saddr := req.AccountIdentifier.Address
-	_, err := dcrutil.DecodeAddress(saddr, s.chainParams)
-	if err != nil {
-		return nil, types.ErrInvalidAccountIdAddr.RError()
+	if req.AccountIdentifier.Address != types.TreasuryAccountAdddress {
+		// Validate regular addresses.
+		_, err := dcrutil.DecodeAddress(saddr, s.chainParams)
+		if err != nil {
+			return nil, types.ErrInvalidAccountIdAddr.RError()
+		}
 	}
 
 	// Figure out when to stop considering blocks (what the target height
