@@ -753,7 +753,7 @@ func TestTxToBlockOps(t *testing.T) {
 // assertTestCaseTxMatches asserts that the given Rosetta transaction matches
 // what was expected for a given test case.
 func assertTestCaseTxMatches(t *testing.T, status OpStatus, txi, tci int,
-	tx *rtypes.Transaction, tc *txToRosettaTestCase) {
+	tx *rtypes.Transaction, tc *txToRosettaTestCase, prevBlockHash *chainhash.Hash) {
 
 	// The number of operations for this tx should match the one expected
 	// for this test case.
@@ -761,6 +761,16 @@ func assertTestCaseTxMatches(t *testing.T, status OpStatus, txi, tci int,
 		t.Fatalf("block tx %d vs test case %d: mismatched nb of "+
 			"ops. want=%d got=%d", txi, tci, len(tc.ops),
 			len(tx.Operations))
+	}
+
+	wantTxId := tc.tx.CachedTxHash().String()
+	if status == OpStatusReversed {
+		wantTxId = prevBlockHash.String() + ":" + wantTxId
+	}
+	if tx.TransactionIdentifier.Hash != wantTxId {
+		t.Fatalf("block tx %d vs test case %d: mismatched tx indentifier. "+
+			"want=%s got=%s", txi, tci, wantTxId,
+			tx.TransactionIdentifier.Hash)
 	}
 
 	for opi, op := range tx.Operations {
@@ -783,6 +793,7 @@ func TestBlockToRosetta(t *testing.T) {
 		},
 	}
 	prev := &wire.MsgBlock{}
+	prevBlockHash := prev.BlockHash()
 
 	tctx := txToRosettaTestCases()
 	for _, tc := range tctx.testCases {
@@ -827,7 +838,8 @@ func TestBlockToRosetta(t *testing.T) {
 			tc := tctx.testCases[tci]
 
 			// Verify the transaction data matches the expected.
-			assertTestCaseTxMatches(t, OpStatusSuccess, txi, tci, tx, tc)
+			assertTestCaseTxMatches(t, OpStatusSuccess, txi, tci,
+				tx, tc, &prevBlockHash)
 
 			// Pass on to the next test case.
 			tci++
@@ -858,7 +870,8 @@ func TestBlockToRosetta(t *testing.T) {
 
 			// Verify the transaction data matches the expected.
 			t.Run(tc.name, func(t *testing.T) {
-				assertTestCaseTxMatches(t, tc.status, txi, tci, tx, tc)
+				assertTestCaseTxMatches(t, tc.status, txi, tci,
+					tx, tc, &prevBlockHash)
 			})
 
 			// Pass on to the next test case.
@@ -911,7 +924,7 @@ func TestMempoolTxToRosetta(t *testing.T) {
 			}
 
 			// Verify the transaction data matches the expected.
-			assertTestCaseTxMatches(t, tc.status, 0, tci, tx, tc)
+			assertTestCaseTxMatches(t, tc.status, 0, tci, tx, tc, nil)
 		})
 		if !ok {
 			break

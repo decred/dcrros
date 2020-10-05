@@ -369,17 +369,36 @@ func IterateBlockOps(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher,
 	return nil
 }
 
-func txMetaToRosetta(tx *wire.MsgTx, txHash *chainhash.Hash) *rtypes.Transaction {
+// txMetaToRosetta generates the Rosetta transaction metadata for a given tx.
+//
+// If blockHash is specified, then the transaction identified constructed is
+// blockhash:txhash.
+func txMetaToRosetta(tx *wire.MsgTx, txHash, blockHash *chainhash.Hash) *rtypes.Transaction {
+	var txId string
+
+	meta := map[string]interface{}{
+		"version":  tx.Version,
+		"expiry":   tx.Expiry,
+		"locktime": tx.LockTime,
+	}
+
+	switch {
+	case blockHash != nil:
+		txId = fmt.Sprintf("%s:%s", blockHash.String(), txHash.String())
+
+		// Include the original tx hash as metadata in case of reversed
+		// txs that use blockhash:txhash identifier.
+		meta["original_tx_hash"] = txHash.String()
+	default:
+		txId = txHash.String()
+	}
+
 	return &rtypes.Transaction{
 		TransactionIdentifier: &rtypes.TransactionIdentifier{
-			Hash: txHash.String(),
+			Hash: txId,
 		},
 		Operations: []*rtypes.Operation{},
-		Metadata: map[string]interface{}{
-			"version":  tx.Version,
-			"expiry":   tx.Expiry,
-			"locktime": tx.LockTime,
-		},
+		Metadata:   meta,
 	}
 
 }
@@ -396,6 +415,11 @@ func WireBlockToRosetta(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher,
 		return nil, ErrNeedsPreviousBlock
 	}
 
+	var prevBlockHash chainhash.Hash
+	if prev != nil {
+		prevBlockHash = prev.BlockHash()
+	}
+
 	var txs []*rtypes.Transaction
 	nbTxs := len(b.Transactions) + len(b.STransactions)
 	if !approvesParent {
@@ -408,8 +432,15 @@ func WireBlockToRosetta(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher,
 	var tx *rtypes.Transaction
 	applyOp := func(op *Op) error {
 		if op.OpIndex == 0 {
+			// Include the block hash in the tx identifier if this
+			// is a reversed tx.
+			var blockHash *chainhash.Hash
+			if op.Status == OpStatusReversed {
+				blockHash = &prevBlockHash
+			}
+
 			// Starting a new transaction.
-			tx = txMetaToRosetta(op.Tx, &op.TxHash)
+			tx = txMetaToRosetta(op.Tx, &op.TxHash, blockHash)
 			txs = append(txs, tx)
 		}
 		tx.Operations = append(tx.Operations, op.ROp())
@@ -464,7 +495,7 @@ func MempoolTxToRosetta(tx *wire.MsgTx, fetchInputs PrevInputsFetcher,
 	chainParams *chaincfg.Params) (*rtypes.Transaction, error) {
 
 	txh := tx.TxHash()
-	rtx := txMetaToRosetta(tx, &txh)
+	rtx := txMetaToRosetta(tx, &txh, nil)
 	applyOp := func(op *Op) error {
 		rtx.Operations = append(rtx.Operations, op.ROp())
 		return nil
