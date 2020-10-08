@@ -21,5 +21,6 @@ require (
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/jrick/logrotate v1.0.0
 	github.com/matheusd/middlelogger v0.1.1
+	github.com/stretchr/testify v1.6.2-0.20200818115829-54d05a4e1844
 	golang.org/x/sync v0.0.0-20200625203802-6e8e738ad208
 )

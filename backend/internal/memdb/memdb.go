@@ -43,6 +43,10 @@ func (t *transaction) Writable() bool {
 	return t.writable
 }
 
+// MemDB is a backenddb.DB implementation that holds data only in memory.
+//
+// Note that this implementation is not a fully featured DB and is only usable
+// according to the current pattern of calls for the backenddb.
 type MemDB struct {
 	balances        map[string][]balanceHeight
 	lastBlockHash   chainhash.Hash
@@ -51,6 +55,7 @@ type MemDB struct {
 	mtx             sync.Mutex
 }
 
+// NewMemDB returns a new instance of a MemDB.
 func NewMemDB() (*MemDB, error) {
 	return &MemDB{
 		balances:        make(map[string][]balanceHeight),
@@ -109,6 +114,23 @@ func (db *MemDB) StoreBalances(wtx backenddb.WriteTx, blockHash chainhash.Hash, 
 	}
 
 	tx := wtx.(*transaction)
+
+	// Do not reprocess a block.
+	if tx.updatedBlock && tx.blockHeight == height {
+		return backenddb.ErrBlockAlreadyProcessed
+	}
+	if db.lastHeight == height {
+		return backenddb.ErrBlockAlreadyProcessed
+	}
+
+	// Do not extend non-tip blocks.
+	if tx.updatedBlock && height != tx.blockHeight+1 {
+		return backenddb.ErrNotExtendingTip
+	}
+	if !tx.updatedBlock && height != db.lastHeight+1 {
+		return backenddb.ErrNotExtendingTip
+	}
+
 	accounts := make([]string, 0, len(balances))
 	for account, balance := range balances {
 		bh := balanceHeight{height: height, balance: balance}
@@ -145,7 +167,7 @@ func (db *MemDB) ProcessedBlockHash(rtx backenddb.ReadTx, height int64) (chainha
 
 // RollbackTip rolls back the current tip. Note this only works if the
 // transaction hasn't already modified the tip.
-func (db *MemDB) RollbackTip(wtx backenddb.WriteTx, height int64, blockHash chainhash.Hash) error {
+func (db *MemDB) RollbackTip(wtx backenddb.WriteTx, blockHash chainhash.Hash, height int64) error {
 	if !wtx.Writable() {
 		return fmt.Errorf("unwritable tx")
 	}
@@ -167,6 +189,11 @@ func (db *MemDB) RollbackTip(wtx backenddb.WriteTx, height int64, blockHash chai
 	// the change in a journal-like fashion in the tx, but suffices for the
 	// current use pattern of the db.
 	oldTip := db.processedBlocks[height]
+	if oldTip == nil {
+		// Haven't processed this yet.
+		return nil
+	}
+
 	for _, acct := range oldTip.accounts {
 		bals := db.balances[acct]
 		if len(bals) == 0 {
@@ -237,6 +264,10 @@ func (db *MemDB) Update(ctx context.Context, f func(tx backenddb.WriteTx) error)
 func (db *MemDB) Close() error {
 	db.mtx.Lock()
 	defer db.mtx.Unlock()
+
+	if db.balances == nil {
+		return backenddb.ErrAlreadyClosed
+	}
 	db.balances = nil
 	return nil
 }

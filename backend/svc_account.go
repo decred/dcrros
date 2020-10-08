@@ -150,6 +150,9 @@ func (s *Server) preProcessAccounts(ctx context.Context) error {
 		return err
 	}
 
+	// We'll start processing at the next block height.
+	startHeight++
+
 	// Use a utxoSet map to speed up sequential processing when traversing
 	// many blocks (useful during initial startup).
 	utxoSet := make(map[wire.OutPoint]*types.PrevInput)

@@ -223,7 +223,7 @@ func (s *Server) rollbackDbChain(dbtx backenddb.WriteTx,
 		var err error
 
 		svrLog.Debugf("Rolling back rewinded tip %d %s", tipHeight, tipHash)
-		if err = s.db.RollbackTip(dbtx, tipHeight, tipHash); err != nil {
+		if err = s.db.RollbackTip(dbtx, tipHash, tipHeight); err != nil {
 			return nil, 0, err
 		}
 		if tipHash, tipHeight, err = s.db.LastProcessedBlock(dbtx); err != nil {
@@ -249,7 +249,7 @@ func (s *Server) rollbackDbChain(dbtx backenddb.WriteTx,
 		var err error
 		svrLog.Debugf("Rolling back reorged tip %d %s", tipHeight, tipHash)
 
-		if err = s.db.RollbackTip(dbtx, tipHeight, tipHash); err != nil {
+		if err = s.db.RollbackTip(dbtx, tipHash, tipHeight); err != nil {
 			return nil, 0, err
 		}
 		if tipHash, tipHeight, err = s.db.LastProcessedBlock(dbtx); err != nil {
@@ -365,7 +365,7 @@ func (s *Server) handleBlockDisconnected(ctx context.Context, header *wire.Block
 		}
 
 		// Rollback this block.
-		return s.db.RollbackTip(dbtx, int64(header.Height), tipHash)
+		return s.db.RollbackTip(dbtx, tipHash, int64(header.Height))
 	})
 	if err != nil {
 		return err

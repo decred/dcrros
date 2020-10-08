@@ -35,6 +35,10 @@ type BadgerDB struct {
 	db  *badger.DB
 }
 
+// NewBadgerDB creates a new instance of a backenddb.DB implementation backed
+// by a Badger database.
+//
+// If filepath is empty, a memory-only DB is created.
 func NewBadgerDB(filepath string) (*BadgerDB, error) {
 	var db *badger.DB
 	var err error
@@ -78,7 +82,7 @@ func (db *BadgerDB) ProcessedBlockHash(rtx backenddb.ReadTx, height int64) (chai
 	return hash, nil
 }
 
-func (db *BadgerDB) RollbackTip(wtx backenddb.WriteTx, height int64, blockHash chainhash.Hash) error {
+func (db *BadgerDB) RollbackTip(wtx backenddb.WriteTx, blockHash chainhash.Hash, height int64) error {
 	tx := wtx.(*transaction)
 	if !wtx.Writable() {
 		return fmt.Errorf("unwritable tx")
@@ -128,6 +132,29 @@ func (db *BadgerDB) StoreBalances(wtx backenddb.WriteTx, blockHash chainhash.Has
 	}
 
 	tx := wtx.(*transaction)
+	// We shouldn't have processed this height yet.
+	_, err := db.ProcessedBlockHash(wtx, height)
+	switch {
+	case errors.Is(err, backenddb.ErrBlockHeightNotFound):
+		// Correct behavior (block not processed yet).
+	case err != nil:
+		// Other errors
+		return err
+	default:
+		// Wrong behavior (called StoreBalances having already
+		// processed this block).
+		return backenddb.ErrBlockAlreadyProcessed
+	}
+
+	// We should be extending the tip.
+	_, currentHeight, err := db.LastProcessedBlock(tx)
+	switch {
+	case err != nil:
+		return err
+	case height != currentHeight+1:
+		return backenddb.ErrNotExtendingTip
+	}
+
 	for account, balance := range balances {
 		if err := putAccountBalanceAt(tx.tx, account, height, balance); err != nil {
 			return err
@@ -160,5 +187,8 @@ func (db *BadgerDB) Update(ctx context.Context, f func(tx backenddb.WriteTx) err
 }
 
 func (db *BadgerDB) Close() error {
+	if db.db.IsClosed() {
+		return backenddb.ErrAlreadyClosed
+	}
 	return db.db.Close()
 }
