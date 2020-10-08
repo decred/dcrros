@@ -93,7 +93,9 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 
 	allTypes := types.AllOpTypes()
 	histBalance := true
-	astr, err := asserter.NewServer(allTypes, histBalance, []*rtypes.NetworkIdentifier{network})
+	var callMethods []string
+	astr, err := asserter.NewServer(allTypes, histBalance,
+		[]*rtypes.NetworkIdentifier{network}, callMethods)
 	if err != nil {
 		return nil, err
 	}

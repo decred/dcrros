@@ -4,13 +4,13 @@
     "network": "testnet3"
   },
   "online_url": "http://localhost:19128",
-  "data_directory": "roscli-test-data/",
-  "http_timeout": 10,
+  "data_directory": "roscli-testnet-data/",
+  "http_timeout": 20,
   "max_retries": 5,
   "retry_elapsed_time": 0,
-  "max_online_connections": 120,
-  "max_sync_concurrency": 64,
-  "tip_delay": 300,
+  "max_online_connections": 130,
+  "max_sync_concurrency": 8,
+  "tip_delay": 120,
   "log_configuration": false,
   "data": {
     "active_reconciliation_concurrency": 16,
@@ -31,9 +31,10 @@
     "results_output_file": "",
     "historical_balance_enabled": true,
     "end_conditions": {
-      "tip": true,
-      "reconciliation_coverage": 1.0
+      "reconciliation_coverage": {
+        "coverage": 1.0,
+        "tip": true
+	}
     }
-
   }
 }

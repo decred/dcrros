@@ -3,7 +3,7 @@ module decred.org/dcrros
 go 1.14
 
 require (
-	github.com/coinbase/rosetta-sdk-go v0.4.4
+	github.com/coinbase/rosetta-sdk-go v0.5.0
 	github.com/decred/dcrd/blockchain/stake/v3 v3.0.0
 	github.com/decred/dcrd/chaincfg/chainhash v1.0.2
 	github.com/decred/dcrd/chaincfg/v3 v3.0.0

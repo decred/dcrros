@@ -1,4 +1,6 @@
 *.swp
 dcrros
-roscli-test-data
+roscli-testnet-data
+roscli-simnet-data
+roscli-mainnet-data
 
