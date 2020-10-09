@@ -116,3 +116,12 @@ func rosettaAccountToPkScript(account *rtypes.AccountIdentifier,
 
 	return version, pkscript, err
 }
+
+// CheckRosettaAccount returns nil if the given account can be decoded by
+// dcrros.
+func CheckRosettaAccount(account *rtypes.AccountIdentifier,
+	chainParams *chaincfg.Params) error {
+
+	_, _, err := rosettaAccountToPkScript(account, chainParams)
+	return err
+}

@@ -190,11 +190,11 @@ func (s *Server) AccountBalance(ctx context.Context, req *rtypes.AccountBalanceR
 	}
 
 	saddr := req.AccountIdentifier.Address
-	if req.AccountIdentifier.Address != types.TreasuryAccountAdddress {
-		// Validate regular addresses.
-		_, err := dcrutil.DecodeAddress(saddr, s.chainParams)
+	if saddr != types.TreasuryAccountAdddress {
+		// Validate non-treasury addresses.
+		err := types.CheckRosettaAccount(req.AccountIdentifier, s.chainParams)
 		if err != nil {
-			return nil, types.ErrInvalidAccountIdAddr.RError()
+			return nil, types.ErrInvalidAccountIdAddr.Msg(err.Error()).RError()
 		}
 	}
 

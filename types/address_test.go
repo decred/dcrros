@@ -193,5 +193,95 @@ func TestRosettaAccountToPkScript(t *testing.T) {
 			break
 		}
 	}
+}
 
+// TestCheckRosettaAccount tests that verifying rosetta accounts works as
+// expected.
+func TestCheckRosettaAccount(t *testing.T) {
+	testnet := chaincfg.TestNet3Params()
+	mainnet := chaincfg.MainNetParams()
+
+	tests := []struct {
+		name    string
+		version uint16
+		addr    string
+		net     *chaincfg.Params
+		wantErr bool
+	}{{
+		name:    "Testnet P2PKH",
+		version: 0,
+		addr:    "Tsg83CCHqrDjocSUScqJbkezdt531FY36Sn",
+		net:     testnet,
+		wantErr: false,
+	}, {
+		name:    "Testnet P2PKH v1",
+		version: 1,
+		addr:    "0x000176a914a5a7f924934685fbca3008c9524dae1cea9f9d3488ac",
+		net:     testnet,
+		wantErr: false,
+	}, {
+		name:    "Testnet P2PKH wrong version",
+		version: 999,
+		addr:    "0x000176a914a5a7f924934685fbca3008c9524dae1cea9f9d3488ac",
+		net:     testnet,
+		wantErr: true,
+	}, {
+		name:    "Testnet P2SH",
+		version: 0,
+		addr:    "TcrypGAcGCRVXrES7hWqVZb5oLJKCZEtoL1",
+		net:     testnet,
+		wantErr: false,
+	}, {
+		name:    "Testnet P2PSH v1",
+		version: 1,
+		addr:    "0x0001a914d585cd7426d25b4ea5faf1e6987aacfeda3db94287",
+		net:     testnet,
+		wantErr: false,
+	}, {
+		name:    "Testnet P2SH wrong version",
+		version: 999,
+		addr:    "0x0001a914d585cd7426d25b4ea5faf1e6987aacfeda3db94287",
+		net:     testnet,
+		wantErr: true,
+	}, {
+		name:    "Testnet P2PKH decoded as mainnet",
+		version: 0,
+		addr:    "Tsg83CCHqrDjocSUScqJbkezdt531FY36Sn",
+		net:     mainnet,
+		wantErr: true,
+	}, {
+		name:    "Mainnet P2PKH",
+		version: 0,
+		addr:    "Dsa3yVGJK9XFx6L5cC8YzcW3M5Q85wdEXcz",
+		net:     mainnet,
+		wantErr: false,
+	}, {
+		name:    "Mainnet P2PKH decoded as testnet",
+		version: 0,
+		addr:    "Dsa3yVGJK9XFx6L5cC8YzcW3M5Q85wdEXcz",
+		net:     testnet,
+		wantErr: true,
+	}}
+
+	for _, tc := range tests {
+		tc := tc
+		ok := t.Run(tc.name, func(t *testing.T) {
+			acct := &rtypes.AccountIdentifier{
+				Address: tc.addr,
+				Metadata: map[string]interface{}{
+					"script_version": tc.version,
+				},
+			}
+			err := CheckRosettaAccount(acct, tc.net)
+			gotErr := err != nil
+			if gotErr != tc.wantErr {
+				t.Fatalf("unexpected error. want=%v got=%v",
+					tc.wantErr, gotErr)
+			}
+		})
+
+		if !ok {
+			break
+		}
+	}
 }
