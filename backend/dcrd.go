@@ -17,6 +17,8 @@ import (
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrjson/v3"
+	"github.com/decred/dcrd/dcrutil/v3"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/rpcclient/v6"
 	"github.com/decred/dcrd/wire"
 )
@@ -30,11 +32,27 @@ const (
 	wantJsonRpcMinor uint32 = 1
 )
 
+// chain specifies the functions needed by a backing chain implementation (an
+// rpcclient.Client instance, a mock chain used for tests, etc).
+type chain interface {
+	GetBlockChainInfo(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error)
+	GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
+	GetBlock(ctx context.Context, blockHash *chainhash.Hash) (*wire.MsgBlock, error)
+	GetRawTransaction(ctx context.Context, txHash *chainhash.Hash) (*dcrutil.Tx, error)
+	GetBestBlockHash(ctx context.Context) (*chainhash.Hash, error)
+	GetRawMempool(ctx context.Context, txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error)
+	SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
+	NotifyBlocks(ctx context.Context) error
+	GetInfo(ctx context.Context) (*chainjson.InfoChainResult, error)
+	Version(ctx context.Context) (map[string]chainjson.VersionResult, error)
+	Connect(ctx context.Context, retry bool) error
+}
+
 // checkDcrd verifies whether the specified dcrd instance fulfills the required
 // elements for running the dcrros server.
 //
 // This method returns the version string reported by the dcrd instance.
-func checkDcrd(ctx context.Context, c *rpcclient.Client, chain *chaincfg.Params) (string, error) {
+func checkDcrd(ctx context.Context, c chain, chain *chaincfg.Params) (string, error) {
 	chainInfo, err := c.GetBlockChainInfo(ctx)
 	if err != nil {
 		return "", fmt.Errorf("unable to get blockchain info from dcrd: %v", err)

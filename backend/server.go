@@ -66,7 +66,7 @@ type ServerConfig struct {
 }
 
 type Server struct {
-	c           *rpcclient.Client
+	c           chain
 	ctx         context.Context
 	chainParams *chaincfg.Params
 	asserter    *asserter.Asserter
