@@ -95,6 +95,9 @@ type Server struct {
 	// certain situations.
 	concurrency int
 
+	// bcl logs the number of connected blocks during certain intervals.
+	bcl *blocksConnectedLogger
+
 	// Caches for speeding up operations.
 	cacheBlocks *lru.KVCache
 	cacheRawTxs *lru.KVCache
@@ -157,6 +160,7 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		blockNtfns:     make([]*blockNtfn, 0),
 		blockNtfnsChan: make(chan struct{}),
 		concurrency:    runtime.NumCPU(),
+		bcl:            &blocksConnectedLogger{lastTime: time.Now()},
 	}
 
 	// Initialize connection to underlying dcrd node if an existing chain
@@ -272,6 +276,8 @@ func (s *Server) Routers() []rserver.Router {
 func (s *Server) Run(ctx context.Context) error {
 	go s.c.Connect(ctx, true)
 	time.Sleep(time.Millisecond * 100)
+
+	go s.bcl.run(ctx)
 
 	if err := s.waitForBlockchainSync(ctx); err != nil {
 		s.db.Close()

@@ -6,6 +6,7 @@ package backend
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"decred.org/dcrros/backend/backenddb"
@@ -60,6 +61,24 @@ func updateUtxoSet(op *types.Op, utxoSet map[wire.OutPoint]*types.PrevInput) {
 	}
 }
 
+// lastProcessedBlock returns the current tip of the server database. This is a
+// convenience function, since it's usually preferable (and safer) to call the
+// db function directly from inside a dbtx if additional operations will be
+// performed.
+func (s *Server) lastProcessedBlock(ctx context.Context) (*chainhash.Hash, int64, error) {
+	var (
+		tipHash   chainhash.Hash
+		tipHeight int64
+	)
+
+	err := s.db.View(ctx, func(dbtx backenddb.ReadTx) error {
+		var err error
+		tipHash, tipHeight, err = s.db.LastProcessedBlock(dbtx)
+		return err
+	})
+	return &tipHash, tipHeight, err
+}
+
 func (s *Server) preProcessAccountBlock(ctx context.Context, bh *chainhash.Hash, b, prev *wire.MsgBlock, utxoSet map[wire.OutPoint]*types.PrevInput) error {
 	fetchInputs := s.makeInputsFetcher(ctx, utxoSet)
 
@@ -98,13 +117,15 @@ func (s *Server) preProcessAccountBlock(ctx context.Context, bh *chainhash.Hash,
 			return err
 		}
 
+		s.bcl.inc(height, bh)
+
 		// Update the db with the new balances.
 		return s.db.StoreBalances(dbtx, *bh, height, newBalances)
 	})
 }
 
 // preProcessAccounts pre-processes the blockchain to setup the account
-// balances index in the server's badger db.
+// balances index in the server's db.
 //
 // This is called during server startup.
 func (s *Server) preProcessAccounts(ctx context.Context) error {
@@ -122,32 +143,28 @@ func (s *Server) preProcessAccounts(ctx context.Context) error {
 		return err
 	}
 
-	// Verify if the last processed block matches the block in the
-	// mainchain at startHeight. If it doesn't, we'll have to roll back due
-	// to a reorg that happened while we were offline.
+	// Verify if the last processed block matches the block in the mainchain
+	// at startHeight. If it doesn't, we'll have to roll back due to a reorg
+	// that happened while we were offline.
 	hash, err := s.c.GetBlockHash(ctx, startHeight)
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to fetch block hash at height %d: %v",
+			startHeight, err)
+
 	}
 	if *hash != startHash && startHeight > 0 {
-		svrLog.Warnf("Last processed block %s does not match current "+
+		svrLog.Debugf("Last processed block %s does not match current "+
 			"mainchain block %s at height %d. Rolling back.",
 			startHash, hash, startHeight)
 
-		err := s.db.Update(s.ctx, func(dbtx backenddb.WriteTx) error {
-			var err error
-			hash, startHeight, err = s.rollbackDbChain(dbtx, hash, startHeight)
-			return err
-		})
+		b, err := s.getBlock(ctx, hash)
 		if err != nil {
 			return err
 		}
-	}
-
-	// Fetch the block prior to starting to process the chain.
-	prev, err := s.getBlock(ctx, hash)
-	if err != nil {
-		return err
+		err = s.switchChainTo(ctx, hash, b, nil)
+		if err != nil {
+			return err
+		}
 	}
 
 	// We'll start processing at the next block height.
@@ -155,20 +172,22 @@ func (s *Server) preProcessAccounts(ctx context.Context) error {
 
 	// Use a utxoSet map to speed up sequential processing when traversing
 	// many blocks (useful during initial startup).
+	//
+	// Note this isn't a true utxoset because it doesn't handle reorgs, but
+	// since outputs aren't malleable and inexistent entries are looked for
+	// in the blockchain, this is safe to use as is.
 	utxoSet := make(map[wire.OutPoint]*types.PrevInput)
 
 	// Sequentially process the chain.
 	svrLog.Infof("Pre-processing accounts in blocks starting at %d", startHeight)
 	var lastHeight int64
 	err = s.processSequentialBlocks(ctx, startHeight, func(bh *chainhash.Hash, b *wire.MsgBlock) error {
-		err := s.preProcessAccountBlock(ctx, bh, b, prev, utxoSet)
-
-		lastHeight = int64(b.Header.Height)
-		if lastHeight%2000 == 0 {
-			svrLog.Infof("Processed up to height %d", lastHeight)
+		err := s.switchChainTo(ctx, bh, b, utxoSet)
+		if err != nil {
+			return err
 		}
 
-		prev = b
+		lastHeight = int64(b.Header.Height)
 		return err
 	})
 	if err != nil {
@@ -176,9 +195,15 @@ func (s *Server) preProcessAccounts(ctx context.Context) error {
 		return err
 	}
 
+	s.bcl.flush()
 	totalTime := time.Since(start)
-	svrLog.Infof("Processed all blocks in %s. Last one was %d", totalTime, lastHeight)
-	svrLog.Debugf("Final utxo set len %d", len(utxoSet))
+	if lastHeight > 0 {
+		svrLog.Infof("Processed all blocks in %s. Last one was %d", totalTime, lastHeight)
+		svrLog.Debugf("Final utxo set len %d", len(utxoSet))
+	} else {
+		svrLog.Info("No blocks processed (already at tip)")
+	}
+
 	return nil
 }
 
@@ -198,17 +223,15 @@ func (s *Server) AccountBalance(ctx context.Context, req *rtypes.AccountBalanceR
 		}
 	}
 
-	// Figure out when to stop considering blocks (what the target height
-	// for balance was requested for by the client). By default it's the
-	// current block height.
+	// Figure out the target block for the balance check requested by the
+	// client. By default it's the current tip.
 	stopHash, stopHeight, _, err := s.getBlockByPartialId(ctx, req.BlockIdentifier)
 	if err != nil {
 		return nil, types.RError(err)
 	}
 
-	// Track the balance across batches of txs.
+	// Fetch the cached balance at that specified height.
 	var balance dcrutil.Amount
-
 	err = s.db.View(ctx, func(dbtx backenddb.ReadTx) error {
 		var err error
 		balance, err = s.db.Balance(dbtx, saddr, stopHeight)

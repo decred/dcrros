@@ -183,7 +183,7 @@ func (s *Server) waitForBlockchainSync(ctx context.Context) error {
 
 // bestBlock returns the current best block hash, height and decoded block.
 func (s *Server) bestBlock(ctx context.Context) (*chainhash.Hash, int64, *wire.MsgBlock, error) {
-	hash, err := s.c.GetBestBlockHash(ctx)
+	hash, _, err := s.lastProcessedBlock(ctx)
 	if err != nil {
 		return nil, 0, nil, err
 	}
@@ -196,7 +196,7 @@ func (s *Server) bestBlock(ctx context.Context) (*chainhash.Hash, int64, *wire.M
 	return hash, int64(block.Header.Height), block, nil
 }
 
-// getBlockByHeight returns the given block identified by its hash.
+// getBlock returns the given block identified by its hash.
 //
 // It returns a types.ErrBlockNotFound if the given block is not found.
 //
@@ -243,28 +243,6 @@ func (s *Server) getBlockHash(ctx context.Context, height int64) (*chainhash.Has
 	default:
 		return &bh, nil
 	}
-}
-
-// getBlockByHeight returns the block at the given main chain height. It also
-// returns its block hash so callers won't have to recalculate it by calling
-// BlockHash().
-//
-// It returns a types.ErrBlockNotFound if the given block is not found.
-//
-// Note this only returns blocks that have been processed.
-func (s *Server) getBlockByHeight(ctx context.Context, height int64) (*chainhash.Hash, *wire.MsgBlock, error) {
-	var bh *chainhash.Hash
-	var err error
-	if bh, err = s.getBlockHash(ctx, height); err != nil {
-		return nil, nil, err
-	}
-
-	var b *wire.MsgBlock
-	if b, err = s.getBlock(ctx, bh); err != nil {
-		return nil, nil, err
-	}
-
-	return bh, b, nil
 }
 
 // getBlockByPartialId returns the block identified by the provided Rosetta
