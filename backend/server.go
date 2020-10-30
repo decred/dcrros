@@ -38,6 +38,10 @@ const (
 	DBTypeMem       DBType = "mem"
 	DBTypeBadger    DBType = "badger"
 	DBTypeBadgerMem DBType = "badgermem"
+
+	// dbTypePreconfigured is only used in tests. It indicates the server
+	// should pickup the db instance from the config object.
+	dbTypePreconfigured DBType = "preconfigured"
 )
 
 func SupportedDBTypes() []DBType {
@@ -64,6 +68,10 @@ type ServerConfig struct {
 
 	CacheSizeBlocks uint
 	CacheSizeRawTxs uint
+
+	// The following fields are only defined during tests.
+
+	db backenddb.DB
 }
 
 type Server struct {
@@ -73,6 +81,7 @@ type Server struct {
 	asserter    *asserter.Asserter
 	network     *rtypes.NetworkIdentifier
 	db          backenddb.DB
+	dbType      DBType
 
 	// concurrency is used to define how many goroutines are executed under
 	// certain situations.
@@ -117,6 +126,8 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		db, err = badgerdb.NewBadgerDB(cfg.DBDir)
 	case DBTypeBadgerMem:
 		db, err = badgerdb.NewBadgerDB("")
+	case dbTypePreconfigured:
+		db = cfg.db
 	default:
 		err = errors.New("unknown db type")
 	}
@@ -132,6 +143,7 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		cacheBlocks:    &cacheBlocks,
 		cacheRawTxs:    &cacheRawTxs,
 		db:             db,
+		dbType:         cfg.DBType,
 		blockNtfns:     make([]*blockNtfn, 0),
 		blockNtfnsChan: make(chan struct{}),
 		concurrency:    runtime.NumCPU(),
@@ -464,6 +476,13 @@ nextevent:
 			}
 		}
 	}
-	s.db.Close()
+
+	if s.dbType != dbTypePreconfigured {
+		closeErr := s.db.Close()
+		if closeErr != nil {
+			svrLog.Errorf("Unable to close DB: %v", closeErr)
+		}
+	}
+
 	return err
 }
