@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"time"
 
 	"decred.org/dcrros/backend/backenddb"
@@ -332,7 +331,7 @@ func (s *Server) getRawTx(ctx context.Context, txh *chainhash.Hash) (*wire.MsgTx
 }
 
 func (s *Server) processSequentialBlocks(ctx context.Context, startHeight int64, f func(*chainhash.Hash, *wire.MsgBlock) error) error {
-	concurrency := int64(runtime.NumCPU())
+	concurrency := int64(s.concurrency)
 	type gbbhReply struct {
 		block *wire.MsgBlock
 		hash  *chainhash.Hash

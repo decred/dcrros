@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"time"
 
@@ -73,6 +74,10 @@ type Server struct {
 	network     *rtypes.NetworkIdentifier
 	db          backenddb.DB
 
+	// concurrency is used to define how many goroutines are executed under
+	// certain situations.
+	concurrency int
+
 	// Caches for speeding up operations.
 	cacheBlocks *lru.KVCache
 	cacheRawTxs *lru.KVCache
@@ -129,6 +134,7 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		db:             db,
 		blockNtfns:     make([]*blockNtfn, 0),
 		blockNtfnsChan: make(chan struct{}),
+		concurrency:    runtime.NumCPU(),
 	}
 
 	// We make a copy of the passed config because we change some of the
