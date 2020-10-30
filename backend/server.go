@@ -60,6 +60,8 @@ type blockNtfn struct {
 	header   *wire.BlockHeader
 }
 
+// ServerConfig specifies the config options when initializing a new server
+// instance.
 type ServerConfig struct {
 	ChainParams *chaincfg.Params
 	DcrdCfg     *rpcclient.ConnConfig
@@ -71,9 +73,16 @@ type ServerConfig struct {
 
 	// The following fields are only defined during tests.
 
+	c  chain
 	db backenddb.DB
 }
 
+// Server offers Decred blocks and services while following the Rosetta specs.
+//
+// Note: the server assumes the underlying chain is correctly following
+// consensus rules. In other words, it does _not_ validate the chain itself,
+// but rather relies on the fact that the underlying dcrd (or other node
+// implementation) _only_ generates valid chain data.
 type Server struct {
 	c           chain
 	ctx         context.Context
@@ -99,6 +108,7 @@ type Server struct {
 	blockNtfnsChan chan struct{}
 }
 
+// NewServer creates a new server instance.
 func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	network := &rtypes.NetworkIdentifier{
 		Blockchain: "decred",
@@ -136,6 +146,7 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	}
 
 	s := &Server{
+		c:              cfg.c,
 		chainParams:    cfg.ChainParams,
 		asserter:       astr,
 		network:        network,
@@ -149,17 +160,21 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		concurrency:    runtime.NumCPU(),
 	}
 
-	// We make a copy of the passed config because we change some of the
-	// parameters locally to ensure they are configured as needed by the
-	// Server struct.
-	connCfg := *cfg.DcrdCfg
-	connCfg.DisableConnectOnNew = true
-	connCfg.DisableAutoReconnect = false
-	connCfg.HTTPPostMode = false
-	s.c, err = rpcclient.New(&connCfg, s.ntfnHandlers())
-	if err != nil {
-		db.Close()
-		return nil, err
+	// Initialize connection to underlying dcrd node if an existing chain
+	// implementation wasn't provided.
+	if cfg.c == nil {
+		// We make a copy of the passed config because we change some
+		// of the parameters locally to ensure they are configured as
+		// needed by the Server struct.
+		connCfg := *cfg.DcrdCfg
+		connCfg.DisableConnectOnNew = true
+		connCfg.DisableAutoReconnect = false
+		connCfg.HTTPPostMode = false
+		s.c, err = rpcclient.New(&connCfg, s.ntfnHandlers())
+		if err != nil {
+			db.Close()
+			return nil, err
+		}
 	}
 
 	return s, nil
