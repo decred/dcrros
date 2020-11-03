@@ -3,7 +3,6 @@ package backend
 import (
 	"context"
 	"encoding/hex"
-	"fmt"
 	"io/ioutil"
 	"math/rand"
 	"os"
@@ -121,8 +120,13 @@ type mockChain struct {
 	// The following *hook functions are called by the corresponding
 	// exported functions if they are defined.
 
-	getBlockHook     func(ctx context.Context, blockHash *chainhash.Hash) (*wire.MsgBlock, error)
-	getBlockHashHook func(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
+	getBlockHook           func(ctx context.Context, blockHash *chainhash.Hash) (*wire.MsgBlock, error)
+	getBlockHashHook       func(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
+	getBlockChainInfoHook  func(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error)
+	getInfoHook            func(ctx context.Context) (*chainjson.InfoChainResult, error)
+	versionHook            func(ctx context.Context) (map[string]chainjson.VersionResult, error)
+	getRawMempoolHook      func(ctx context.Context, txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error)
+	sendRawTransactionHook func(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
 }
 
 type blockMangler func(b *wire.MsgBlock)
@@ -273,7 +277,17 @@ func (mc *mockChain) rewindChain(nbBlocks int) {
 }
 
 func (mc *mockChain) GetBlockChainInfo(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error) {
-	return nil, nil
+	mc.mtx.Lock()
+	defer mc.mtx.Unlock()
+
+	if mc.getBlockChainInfoHook != nil {
+		return mc.getBlockChainInfoHook(ctx)
+	}
+	return &chainjson.GetBlockChainInfoResult{
+		SyncHeight:           mc.tipHeight,
+		InitialBlockDownload: false,
+		Blocks:               mc.tipHeight,
+	}, nil
 }
 
 func (mc *mockChain) getBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error) {
@@ -319,7 +333,10 @@ func (mc *mockChain) GetRawTransaction(ctx context.Context, txHash *chainhash.Ha
 
 	tx, ok := mc.txByHash[*txHash]
 	if !ok {
-		return nil, fmt.Errorf("tx does not exist")
+		return nil, &dcrjson.RPCError{
+			Code:    dcrjson.ErrRPCNoTxInfo,
+			Message: "tx does not exist",
+		}
 	}
 	return dcrutil.NewTx(tx), nil
 }
@@ -329,10 +346,16 @@ func (mc *mockChain) GetBestBlockHash(ctx context.Context) (*chainhash.Hash, err
 }
 
 func (mc *mockChain) GetRawMempool(ctx context.Context, txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error) {
+	if mc.getRawMempoolHook != nil {
+		return mc.getRawMempoolHook(ctx, txType)
+	}
 	return nil, nil
 }
 
 func (mc *mockChain) SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error) {
+	if mc.sendRawTransactionHook != nil {
+		return mc.sendRawTransactionHook(ctx, tx, allowHighFees)
+	}
 	return nil, nil
 }
 
@@ -341,10 +364,16 @@ func (mc *mockChain) NotifyBlocks(ctx context.Context) error {
 }
 
 func (mc *mockChain) GetInfo(ctx context.Context) (*chainjson.InfoChainResult, error) {
+	if mc.getInfoHook != nil {
+		return mc.getInfoHook(ctx)
+	}
 	return nil, nil
 }
 
 func (mc *mockChain) Version(ctx context.Context) (map[string]chainjson.VersionResult, error) {
+	if mc.versionHook != nil {
+		return mc.versionHook(ctx)
+	}
 	return nil, nil
 }
 

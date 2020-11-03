@@ -31,11 +31,21 @@ const (
 	rosettaVersion = "1.4.0"
 )
 
+// DBType defines the available database types.
 type DBType string
 
 const (
-	DBTypeMem       DBType = "mem"
-	DBTypeBadger    DBType = "badger"
+	// DBTypeMem holds all data in memory structures. This has the best
+	// performance but requires reprocessing the chain every time the
+	// server runs.
+	DBTypeMem DBType = "mem"
+
+	// DBTypeBadger holds all data in a Badger DB instance. This offers a
+	// good compromise between not having to reprocess the chain at every
+	// startup and performance.
+	DBTypeBadger DBType = "badger"
+
+	// DBTypeBadgerMem holds all data in a memory-only Badger DB instance.
 	DBTypeBadgerMem DBType = "badgermem"
 
 	// dbTypePreconfigured is only used in tests. It indicates the server
@@ -43,6 +53,7 @@ const (
 	dbTypePreconfigured DBType = "preconfigured"
 )
 
+// SupportedDBTypes returns all publicly-available DB drivers for the server.
 func SupportedDBTypes() []DBType {
 	return []DBType{DBTypeMem, DBTypeBadger, DBTypeBadgerMem}
 }
@@ -293,6 +304,7 @@ func (s *Server) Run(ctx context.Context) error {
 	// Now that we've processed the accounts, we can register for block
 	// notifications.
 	if err := s.c.NotifyBlocks(ctx); err != nil {
+		s.db.Close()
 		return err
 	}
 	svrLog.Infof("Waiting for block notifications")
