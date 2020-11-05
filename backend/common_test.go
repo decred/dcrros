@@ -95,6 +95,16 @@ func mustHex(s string) []byte {
 	return b
 }
 
+// mustHash decodes the given string as chainhash. It must only be used with
+// hardcoded values.
+func mustHash(s string) chainhash.Hash {
+	var h chainhash.Hash
+	if err := chainhash.Decode(&h, s); err != nil {
+		panic(err)
+	}
+	return h
+}
+
 // mockChain is a mock struct used for tests, which fulfills the chain
 // interface.
 //
