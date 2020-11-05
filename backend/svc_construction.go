@@ -22,11 +22,11 @@ const (
 	// p2pkhSigScriptSerSize is the maximum serialization size for a standard v0
 	// signature script field that redeems a P2PKH output.
 	//
-	// It is calculated as VarIntSerializeSize(108) + OP_DATA_73 + [72 byte sig +
-	// sig hash type] + OP_DATA_33 + [33 byte pubkey]
+	// It is calculated as OP_DATA_73 + [72 byte sig + sig hash type] +
+	// OP_DATA_33 + [33 byte pubkey]
 	//
-	// Total: 109 bytes.
-	p2pkhSigScriptSerSize = 109
+	// Total: 108 bytes.
+	p2pkhSigScriptSerSize = 108
 
 	// networkFee is the widely used network relay fee in Atoms/kB.
 	networkFee = int64(1e4)
