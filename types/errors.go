@@ -306,3 +306,30 @@ func RError(err error) *rtypes.Error {
 
 	return ErrUnknown.Msg(err.Error()).RError()
 }
+
+// RosettaErrorIs returns true is the passed Rosetta error value corresponds to
+// the given error.
+//
+// This returns true if both errors are nil or if err unwraps into an ErrorCode
+// that matches the error code in rerr.
+//
+// This function is necessary due to the Rosetta types.Error structure not
+// implementing Go's error interface.
+func RosettaErrorIs(rerr *rtypes.Error, err error) bool {
+	rerrNil := rerr == nil
+	errNil := err == nil
+	var ec ErrorCode
+
+	switch {
+	case rerrNil && errNil:
+		return true
+
+	case rerrNil != errNil:
+		return false
+
+	case !errors.As(err, &ec):
+		return false
+	}
+
+	return int32(ec) == rerr.Code
+}

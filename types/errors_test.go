@@ -26,6 +26,18 @@ func (err rerror) Error() string {
 	return err.e.Message
 }
 
+type wrapped struct {
+	err error
+}
+
+func (err wrapped) Error() string {
+	return err.Error()
+}
+
+func (err wrapped) Unwrap() error {
+	return err.err
+}
+
 // TestAllErrorsHaveDefaultMsgs ensures that all defined error constants have a
 // corresponding error message.
 func TestAllErrorsHaveDefaultMsgs(t *testing.T) {
@@ -249,30 +261,6 @@ func TestErrorsToRError(t *testing.T) {
 	}
 }
 
-// unwrappableEC is an error that unwraps into an ErrorCode
-type unwrappableEC struct {
-	c ErrorCode
-}
-
-func (err unwrappableEC) Error() string {
-	return ""
-}
-func (err unwrappableEC) Unwrap() error {
-	return err.c
-}
-
-// unwrappableError is an error that unwraps into an Error
-type unwrappableErr struct {
-	e Error
-}
-
-func (err unwrappableErr) Error() string {
-	return ""
-}
-func (err unwrappableErr) Unwrap() error {
-	return err.e
-}
-
 // TestRErrorFunc ensures the RError convencience function works as intended.
 func TestRErrorFunc(t *testing.T) {
 	tests := []struct {
@@ -292,12 +280,12 @@ func TestRErrorFunc(t *testing.T) {
 		err:    rerror{&rtypes.Error{Code: 0xffff, Message: "blah"}},
 		target: rtypes.Error{Code: 0xffff, Message: "blah"},
 	}, {
-		name:   "unwrappableEC",
-		err:    unwrappableEC{ErrBlockNotFound},
+		name:   "wrapped ErrorCode",
+		err:    wrapped{err: ErrBlockNotFound},
 		target: rtypes.Error{Code: int32(ErrBlockNotFound), Message: errorCodeMsgs[ErrBlockNotFound]},
 	}, {
-		name:   "unwrappableErr",
-		err:    unwrappableErr{Error{code: ErrBlockNotFound}},
+		name:   "wrapped Error",
+		err:    wrapped{err: Error{code: ErrBlockNotFound}},
 		target: rtypes.Error{Code: int32(ErrBlockNotFound), Message: errorCodeMsgs[ErrBlockNotFound]},
 	}, {
 		name:   "Unknown Error",
@@ -348,4 +336,90 @@ func TestRErrorFunc(t *testing.T) {
 		t.Fatalf("Two different generic errors should not generate " +
 			"different messages")
 	}
+}
+
+// TestRosettaErrorIs verifies the RosettaErrorIs function behaves as expected.
+func TestRosettaErrorIs(t *testing.T) {
+	tests := []struct {
+		name   string
+		rerr   *rtypes.Error
+		err    error
+		wantIs bool
+	}{{
+		name:   "nil and nil",
+		rerr:   nil,
+		err:    nil,
+		wantIs: true,
+	}, {
+		name:   "nil and !nil",
+		rerr:   nil,
+		err:    errors.New("foo"),
+		wantIs: false,
+	}, {
+		name:   "!nil and nil",
+		rerr:   &rtypes.Error{},
+		err:    nil,
+		wantIs: false,
+	}, {
+		name:   "same error code",
+		rerr:   &rtypes.Error{Code: 10},
+		err:    ErrorCode(10),
+		wantIs: true,
+	}, {
+		name:   "different error code",
+		rerr:   &rtypes.Error{Code: 10},
+		err:    ErrorCode(11),
+		wantIs: false,
+	}, {
+		name:   "non ErrorCode error",
+		rerr:   &rtypes.Error{Code: 10},
+		err:    errors.New("foo"),
+		wantIs: false,
+	}, {
+		name:   "error with same error code",
+		rerr:   &rtypes.Error{Code: 10},
+		err:    Error{code: 10},
+		wantIs: true,
+	}, {
+		name:   "error with different error code",
+		rerr:   &rtypes.Error{Code: 10},
+		err:    Error{code: 11},
+		wantIs: false,
+	}, {
+		name:   "wrapped ErrorCode with same code",
+		rerr:   &rtypes.Error{Code: 10},
+		err:    wrapped{err: ErrorCode(10)},
+		wantIs: true,
+	}, {
+		name:   "wrapped ErrorCode with different code",
+		rerr:   &rtypes.Error{Code: 10},
+		err:    wrapped{err: ErrorCode(11)},
+		wantIs: false,
+	}, {
+		name:   "wrapped Error with same code",
+		rerr:   &rtypes.Error{Code: 10},
+		err:    wrapped{err: Error{code: 10}},
+		wantIs: true,
+	}, {
+		name:   "wrapped Error with different code",
+		rerr:   &rtypes.Error{Code: 10},
+		err:    wrapped{err: Error{code: 11}},
+		wantIs: false,
+	}}
+
+	for _, tc := range tests {
+		tc := tc
+		ok := t.Run(tc.name, func(t *testing.T) {
+			gotIs := RosettaErrorIs(tc.rerr, tc.err)
+			if tc.wantIs != gotIs {
+				t.Fatalf("unexpected result. want=%v got=%v",
+					tc.wantIs, gotIs)
+			}
+		})
+
+		if !ok {
+			break
+		}
+	}
+
 }
