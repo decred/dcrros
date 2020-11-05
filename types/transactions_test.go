@@ -160,7 +160,7 @@ func rosToTxTestCases() *rosToTxTestContext {
 	}, {
 		op: &rtypes.Operation{
 			Type:   "debit",
-			Amount: amt(30),
+			Amount: amt(-30),
 			Metadata: map[string]interface{}{
 				"prev_tree":    int8(0),
 				"sequence":     uint32(0),

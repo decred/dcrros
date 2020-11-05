@@ -160,6 +160,10 @@ func rosettaOpToTx(op *rtypes.Operation, tx *wire.MsgTx, chainParams *chaincfg.P
 
 	switch OpType(op.Type) {
 	case OpTypeDebit:
+		// If the amount is negative, reverse it.
+		if opAmt < 0 {
+			opAmt = -opAmt
+		}
 		var prevOut wire.OutPoint
 
 		// Debits require an originating coins_spent CoinChange so we can fill
