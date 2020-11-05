@@ -188,7 +188,13 @@ func (s *Server) bestBlock(ctx context.Context) (*chainhash.Hash, int64, *wire.M
 		return nil, 0, nil, err
 	}
 
-	block, err := s.c.GetBlock(ctx, hash)
+	// Special case an unitialized database to return the genesis block.
+	var emptyHash chainhash.Hash
+	if *hash == emptyHash {
+		return &s.chainParams.GenesisHash, 0, s.chainParams.GenesisBlock, nil
+	}
+
+	block, err := s.getBlock(ctx, hash)
 	if err != nil {
 		return nil, 0, nil, err
 	}
@@ -228,6 +234,11 @@ func (s *Server) getBlock(ctx context.Context, bh *chainhash.Hash) (*wire.MsgBlo
 //
 // Note this only returns block hashes for previously processed blocks.
 func (s *Server) getBlockHash(ctx context.Context, height int64) (*chainhash.Hash, error) {
+	// Special case genesis.
+	if height == 0 {
+		return &s.chainParams.GenesisHash, nil
+	}
+
 	var bh chainhash.Hash
 	err := s.db.View(ctx, func(dbtx backenddb.ReadTx) error {
 		var err error
@@ -275,7 +286,6 @@ func (s *Server) getBlockByPartialId(ctx context.Context, bli *rtypes.PartialBlo
 		if err := chainhash.Decode(bh, *bli.Hash); err != nil {
 			return nil, 0, nil, types.ErrInvalidChainHash
 		}
-
 	case bli.Index != nil:
 		if bh, err = s.getBlockHash(ctx, *bli.Index); err != nil {
 			return nil, 0, nil, err
