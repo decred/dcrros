@@ -142,6 +142,18 @@ func TestRosettaAccountToPkScript(t *testing.T) {
 		valid:   false,
 		net:     testnet,
 	}, {
+		name:    "Testnet P2SH too short",
+		version: 1,
+		addr:    "0x000",
+		valid:   false,
+		net:     testnet,
+	}, {
+		name:    "Testnet P2SH wrong prefix",
+		version: 1,
+		addr:    "0,0001a914d585cd7426d25b4ea5faf1e6987aacfeda3db94287",
+		valid:   false,
+		net:     testnet,
+	}, {
 		name:    "Testnet P2PKH decoded as mainnet",
 		version: 0,
 		addr:    "Tsg83CCHqrDjocSUScqJbkezdt531FY36Sn",
