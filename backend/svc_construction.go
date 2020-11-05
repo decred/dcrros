@@ -130,8 +130,8 @@ func (s *Server) ConstructionPreprocess(ctx context.Context,
 		return nil, types.RError(err)
 	}
 
-	// Figure out how many inputs are not signed and assume they are standard
-	// P2PKH.
+	// Figure out how many inputs are not signed and assume they are
+	// standard P2PKH.
 	var nbInputs int
 	for _, in := range tx.TxIn {
 		if len(in.SignatureScript) == 0 {
@@ -345,9 +345,9 @@ func (s *Server) ConstructionSubmit(ctx context.Context,
 				// Generic rule error.
 				return nil, types.ErrProcessingTx.Msg(err.Error()).RError()
 			}
-
-			return nil, types.RError(err)
 		}
+
+		return nil, types.RError(err)
 	}
 
 	return &rtypes.TransactionIdentifierResponse{
