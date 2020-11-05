@@ -108,7 +108,7 @@ func (s *Server) Block(ctx context.Context, req *rtypes.BlockRequest) (*rtypes.B
 	// VoteBits == 0.
 	approvesParent := b.Header.VoteBits&0x01 == 0x01
 	if !approvesParent && b.Header.Height > 0 {
-		prev, err = s.c.GetBlock(ctx, &b.Header.PrevBlock)
+		prev, err = s.getBlock(ctx, &b.Header.PrevBlock)
 		if rpcerr, ok := err.(*dcrjson.RPCError); ok && rpcerr.Code == dcrjson.ErrRPCBlockNotFound {
 			return nil, types.ErrBlockNotFound.RError()
 		}
