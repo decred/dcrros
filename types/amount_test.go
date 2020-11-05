@@ -123,6 +123,23 @@ func TestRosettaToDcrAmt(t *testing.T) {
 		name:  "wrong currency",
 		amt:   mkWrong("0"),
 		valid: false,
+	}, {
+		name:  "no currency",
+		amt:   &rtypes.Amount{Value: "0"},
+		valid: false,
+	}, {
+		name: "wrong decimals",
+		amt: &rtypes.Amount{
+			Value: "0",
+			Currency: &rtypes.Currency{
+				Symbol:   "DCR",
+				Decimals: 3,
+			}},
+		valid: false,
+	}, {
+		name:  "nil value",
+		amt:   nil,
+		valid: false,
 	}}
 
 	for _, tc := range tests {

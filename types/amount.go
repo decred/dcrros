@@ -33,6 +33,12 @@ func DcrAmountToRosetta(amt dcrutil.Amount) *rtypes.Amount {
 // Only amounts with the dcrros currency symbol (Symbol: "DCR", Decimals: 8)
 // can be converted.
 func RosettaToDcrAmount(ramt *rtypes.Amount) (dcrutil.Amount, error) {
+	if ramt == nil {
+		return 0, fmt.Errorf("nil amount")
+	}
+	if ramt.Currency == nil {
+		return 0, fmt.Errorf("currency not specified")
+	}
 	if ramt.Currency.Symbol != currencySymbol.Symbol {
 		return 0, fmt.Errorf("currency symbol does not match expected %s",
 			currencySymbol.Symbol)
