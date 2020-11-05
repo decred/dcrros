@@ -13,6 +13,7 @@ import (
 	"github.com/decred/dcrd/dcrutil/v3"
 	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
+	"github.com/stretchr/testify/require"
 )
 
 type rosToTxTestCase struct {
@@ -425,31 +426,8 @@ func TestExtractSignPayloads(t *testing.T) {
 	}
 }
 
-func sigFromBytes(bt []byte) *ecdsa.Signature {
-	var r, s secp256k1.ModNScalar
-	r.SetByteSlice(bt[:32])
-	s.SetByteSlice(bt[32:])
-	return ecdsa.NewSignature(&r, &s)
-}
-
-func mustParsePubKey(s string) *secp256k1.PublicKey {
-	pk, err := secp256k1.ParsePubKey(mustHex(s))
-	if err != nil {
-		panic(err)
-	}
-	return pk
-}
-
-func appendMany(slices ...[]byte) []byte {
-	var size, offset int
-	for _, s := range slices {
-		size += len(s)
-	}
-	res := make([]byte, size)
-	for _, s := range slices {
-		offset += copy(res[offset:], s)
-	}
-	return res
+func mustParsePrivKey(s string) *secp256k1.PrivateKey {
+	return secp256k1.PrivKeyFromBytes(mustHex(s))
 }
 
 // TestCombineSigs tests the function that combines signatures to an unsinged
@@ -457,121 +435,162 @@ func appendMany(slices ...[]byte) []byte {
 func TestCombineSigs(t *testing.T) {
 	chainParams := chaincfg.RegNetParams()
 
-	pk1 := mustParsePubKey("03fcff622d4202a17c2b4c8738b1339fb23bfcd923fc83fce59e119d49325aa5a5")
-	pk2 := mustParsePubKey("024134138277e4aa88ab3e08cc72310f3bad4e47eb042dd6551b0930dd89966107")
-	pk1Bytes := pk1.SerializeCompressed()
-	pk2Bytes := pk2.SerializeCompressed()
+	privKey := mustParsePrivKey("06013accb1e4683ba950cbf8326bd385ad83e8a25485da6ba3cf1c4de75c47d3")
+	pubKey := privKey.PubKey()
+	pubKeyBytes := pubKey.SerializeCompressed()
+	pkScript := mustHex("76a9140f7298d134a0bf2af6ecf7e978bba4faa6d4fa4188ac")
+	scriptVersion := uint16(0)
+	scriptFlags := txscript.ScriptDiscourageUpgradableNops |
+		txscript.ScriptVerifyCheckLockTimeVerify |
+		txscript.ScriptVerifyCleanStack |
+		txscript.ScriptVerifySigPushOnly |
+		txscript.ScriptVerifySHA256 |
+		txscript.ScriptVerifyTreasury
 
-	sigBytes1 := bytes.Repeat([]byte{0xca}, 64)
-	sigBytes2 := bytes.Repeat([]byte{0x1b}, 64)
-	sig1 := sigFromBytes(sigBytes1)
-	sig2 := sigFromBytes(sigBytes2)
-	sigDer1 := sig1.Serialize()
-	sigDer2 := sig2.Serialize()
-	sigDer1Len := []byte{byte(txscript.OP_DATA_1 + len(sigDer1))}
-	sigDer2Len := []byte{byte(txscript.OP_DATA_1 + len(sigDer2))}
-	sigHashAll := []byte{byte(txscript.SigHashAll)}
-	opData33 := []byte{byte(txscript.OP_DATA_33)}
-	sigScripts := [][]byte{
-		appendMany(sigDer1Len, sigDer1, sigHashAll, opData33, pk1Bytes),
-		appendMany(sigDer2Len, sigDer2, sigHashAll, opData33, pk2Bytes),
-	}
-
-	sigs := []*rtypes.Signature{{
-		PublicKey: &rtypes.PublicKey{
-			Bytes:     pk1Bytes,
-			CurveType: rtypes.Secp256k1,
-		},
-		SignatureType: rtypes.Ecdsa,
-		Bytes:         sigBytes1,
-	}, {
-		PublicKey: &rtypes.PublicKey{
-			Bytes:     pk2Bytes,
-			CurveType: rtypes.Secp256k1,
-		},
-		SignatureType: rtypes.Ecdsa,
-		Bytes:         sigBytes2,
-	}}
-
-	// First test: everything correct.
-	t.Run("correct combine", func(t *testing.T) {
+	// Helper to generate a valid, signed tx.
+	txAndSigs := func(t *testing.T, nbIns int) ([]*rtypes.Signature, *wire.MsgTx) {
 		tx := wire.NewMsgTx()
-		tx.AddTxIn(&wire.TxIn{})
-		tx.AddTxIn(&wire.TxIn{})
-
-		err := CombineTxSigs(sigs, tx, chainParams)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+		tx.AddTxOut(&wire.TxOut{})
+		for i := 0; i < nbIns; i++ {
+			tx.AddTxIn(&wire.TxIn{})
 		}
 
-		for i := range sigs {
-			wantSigScript := sigScripts[i]
-			if !bytes.Equal(wantSigScript, tx.TxIn[i].SignatureScript) {
-				t.Fatalf("sig %d unexpected sigscript. want=%x "+
-					"got=%x", i, wantSigScript, tx.TxIn[0].SignatureScript)
+		sigs := make([]*rtypes.Signature, nbIns)
+		for i := 0; i < nbIns; i++ {
+			var err error
+			sigHash, err := txscript.CalcSignatureHash(pkScript,
+				txscript.SigHashAll, tx, i, nil)
+			require.NoError(t, err)
+			sigBytes := ecdsa.SignCompact(privKey, sigHash, true)
+			sigBytes = sigBytes[1:]
+
+			pkCopy := make([]byte, len(pubKeyBytes))
+			copy(pkCopy, pubKeyBytes)
+			sigs[i] = &rtypes.Signature{
+				SigningPayload: &rtypes.SigningPayload{
+					Bytes: sigHash,
+				},
+				PublicKey: &rtypes.PublicKey{
+					Bytes:     pkCopy,
+					CurveType: rtypes.Secp256k1,
+				},
+				SignatureType: rtypes.Ecdsa,
+				Bytes:         sigBytes,
 			}
 		}
-	})
 
-	// Second test: incorrect number of sigs vs inputs.
-	t.Run("incorrect nb of inputs", func(t *testing.T) {
-		tx := wire.NewMsgTx()
-		tx.AddTxIn(&wire.TxIn{})
+		return sigs, tx
+	}
 
+	nCorrectSigs := func(nbIns int) func(t *testing.T) ([]*rtypes.Signature, *wire.MsgTx) {
+		return func(t *testing.T) ([]*rtypes.Signature, *wire.MsgTx) {
+			return txAndSigs(t, nbIns)
+		}
+	}
+
+	type testCase struct {
+		name    string
+		genSigs func(t *testing.T) ([]*rtypes.Signature, *wire.MsgTx)
+		wantErr error
+	}
+
+	testCases := []testCase{{
+		name:    "zero correct sigs",
+		genSigs: nCorrectSigs(0),
+	}, {
+		name:    "one correct sig",
+		genSigs: nCorrectSigs(1),
+	}, {
+		name:    "three correct sigs",
+		genSigs: nCorrectSigs(3),
+	}, {
+		name: "less inputs than sigs",
+		genSigs: func(t *testing.T) ([]*rtypes.Signature, *wire.MsgTx) {
+			sigs, tx := txAndSigs(t, 2)
+			sigs = append(sigs, sigs[0])
+			return sigs, tx
+		},
+		wantErr: ErrIncorrectSigCount,
+	}, {
+		name: "less sigs than inputs",
+		genSigs: func(t *testing.T) ([]*rtypes.Signature, *wire.MsgTx) {
+			sigs, tx := txAndSigs(t, 3)
+			sigs = sigs[:2]
+			return sigs, tx
+		},
+		wantErr: ErrIncorrectSigCount,
+	}, {
+		name: "invalid pubkey",
+		genSigs: func(t *testing.T) ([]*rtypes.Signature, *wire.MsgTx) {
+			sigs, tx := txAndSigs(t, 3)
+			sigs[1].PublicKey.Bytes[1] = ^sigs[1].PublicKey.Bytes[1]
+			return sigs, tx
+		},
+		wantErr: ErrInvalidPubKey,
+	}, {
+		name: "short signature",
+		genSigs: func(t *testing.T) ([]*rtypes.Signature, *wire.MsgTx) {
+			sigs, tx := txAndSigs(t, 3)
+			sigs[1].Bytes = sigs[1].Bytes[1:]
+			return sigs, tx
+		},
+		wantErr: ErrIncorrectSigSize,
+	}, {
+		name: "invalid signature",
+		genSigs: func(t *testing.T) ([]*rtypes.Signature, *wire.MsgTx) {
+			sigs, tx := txAndSigs(t, 3)
+			sigs[1].Bytes[0] = ^sigs[1].Bytes[0]
+			return sigs, tx
+		},
+		wantErr: ErrInvalidSig,
+	}, {
+		name: "unsupported curve",
+		genSigs: func(t *testing.T) ([]*rtypes.Signature, *wire.MsgTx) {
+			sigs, tx := txAndSigs(t, 3)
+			sigs[1].PublicKey.CurveType = "foo"
+			return sigs, tx
+		},
+		wantErr: ErrUnsupportedCurveType,
+	}, {
+		name: "unsupported sig type",
+		genSigs: func(t *testing.T) ([]*rtypes.Signature, *wire.MsgTx) {
+			sigs, tx := txAndSigs(t, 3)
+			sigs[1].SignatureType = "foo"
+			return sigs, tx
+		},
+		wantErr: ErrUnsupportedSignatureType,
+	}}
+
+	test := func(t *testing.T, tc *testCase) {
+		t.Parallel()
+
+		sigs, tx := tc.genSigs(t)
 		err := CombineTxSigs(sigs, tx, chainParams)
-		if err != ErrIncorrectSigCount {
-			t.Fatalf("unexpected error: want=%v got=%v",
-				ErrIncorrectSigCount, err)
+		if !errors.Is(err, tc.wantErr) {
+			t.Fatalf("unexpected error. want=%v got=%v",
+				tc.wantErr, err)
 		}
 
-	})
-
-	// Third test: unsupported signature type
-	t.Run("unsupported ecdsaRecovery", func(t *testing.T) {
-		tx := wire.NewMsgTx()
-		tx.AddTxIn(&wire.TxIn{})
-		tx.AddTxIn(&wire.TxIn{})
-
-		sigs[1].SignatureType = rtypes.EcdsaRecovery
-
-		err := CombineTxSigs(sigs, tx, chainParams)
-		if !errors.Is(err, ErrUnsupportedSignatureType) {
-			t.Fatalf("unexpected error: want=%v got=%v",
-				ErrIncorrectSigCount, err)
+		if tc.wantErr != nil {
+			return
 		}
 
-	})
+		// If all sigs were successfully combined, all script inputs
+		// should be correctly executed.
+		for i := 0; i < len(tx.TxIn); i++ {
+			vm, err := txscript.NewEngine(pkScript, tx, i,
+				scriptFlags, scriptVersion, nil)
+			require.NoError(t, err)
 
-	// Fourth test: unsupported signature type
-	t.Run("unsupported ed25519", func(t *testing.T) {
-		tx := wire.NewMsgTx()
-		tx.AddTxIn(&wire.TxIn{})
-		tx.AddTxIn(&wire.TxIn{})
-
-		sigs[1].SignatureType = rtypes.Ed25519
-
-		err := CombineTxSigs(sigs, tx, chainParams)
-		if !errors.Is(err, ErrUnsupportedSignatureType) {
-			t.Fatalf("unexpected error: want=%v got=%v",
-				ErrIncorrectSigCount, err)
+			if err := vm.Execute(); err != nil {
+				t.Fatalf("error executing resulting script %d: %v",
+					i, err)
+			}
 		}
+	}
 
-	})
-
-	// Fifht test: unsupported curve type
-	t.Run("unsupported curve", func(t *testing.T) {
-		tx := wire.NewMsgTx()
-		tx.AddTxIn(&wire.TxIn{})
-		tx.AddTxIn(&wire.TxIn{})
-
-		sigs[1].SignatureType = rtypes.Ecdsa
-		sigs[1].PublicKey.CurveType = rtypes.Secp256r1
-
-		err := CombineTxSigs(sigs, tx, chainParams)
-		if !errors.Is(err, ErrUnsupportedCurveType) {
-			t.Fatalf("unexpected error: want=%v got=%v",
-				ErrIncorrectSigCount, err)
-		}
-
-	})
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) { test(t, &tc) })
+	}
 }

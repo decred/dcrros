@@ -410,11 +410,10 @@ func ExtractTxSigners(ops []*rtypes.Operation, tx *wire.MsgTx,
 			if err != nil {
 				return nil, ErrInvalidOp.Msgf("error extracting "+
 					"input signer for op %d: %v", i, err)
-
 			}
 
-			// Some inputs are valid but we don't know how to produce a
-			// SigningPayload for, so we just skip those.
+			// Some inputs are valid but we don't know how to
+			// produce a SigningPayload for, so we just skip those.
 			if signer != nil {
 				signers = append(signers, signer)
 			}
@@ -446,6 +445,11 @@ func CombineTxSigs(sigs []*rtypes.Signature, tx *wire.MsgTx,
 			return ErrUnsupportedCurveType
 		}
 
+		pubkey, err := secp256k1.ParsePubKey(sig.PublicKey.Bytes)
+		if err != nil {
+			return ErrInvalidPubKey.Msg(err.Error())
+		}
+
 		switch sig.SignatureType {
 		case rtypes.Ecdsa:
 			if len(sig.Bytes) != 64 {
@@ -459,6 +463,13 @@ func CombineTxSigs(sigs []*rtypes.Signature, tx *wire.MsgTx,
 			r.SetByteSlice(sig.Bytes[:32])
 			s.SetByteSlice(sig.Bytes[32:])
 			ecdsaSig := ecdsa.NewSignature(&r, &s)
+
+			// Verify the sig before we proceed.
+			if !ecdsaSig.Verify(sig.SigningPayload.Bytes, pubkey) {
+				return ErrInvalidSig.Msgf("sig at index %d failed verification", i)
+			}
+
+			// Re-serialize in DER format.
 			derSig := ecdsaSig.Serialize()
 
 			// Add the sighash type after the sig.
