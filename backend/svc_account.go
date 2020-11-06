@@ -86,6 +86,26 @@ func (s *Server) preProcessAccountBlock(ctx context.Context, bh *chainhash.Hash,
 	newBalances := make(map[string]dcrutil.Amount)
 
 	return s.db.Update(ctx, func(dbtx backenddb.WriteTx) error {
+		// Ensure we won't store blocks out of order.
+		tipHash, tipHeight, err := s.db.LastProcessedBlock(dbtx)
+		if err != nil {
+			return err
+		}
+		prevHash := b.Header.PrevBlock
+		prevHeight := int64(b.Header.Height) - 1
+
+		// Special case genesis.
+		if (tipHash == chainhash.Hash{}) && (tipHeight == 0) {
+			tipHash = s.chainParams.GenesisHash
+		}
+
+		if tipHeight != prevHeight || tipHash != b.Header.PrevBlock {
+			return fmt.Errorf("attempting to process block that "+
+				"does not extend tip. tip hash=%s height=%d, "+
+				"prev hash=%s height=%d", tipHash, tipHeight,
+				prevHash, prevHeight)
+		}
+
 		applyOp := func(op *types.Op) error {
 			account := op.Account
 			if _, ok := newBalances[account]; !ok {
@@ -112,7 +132,7 @@ func (s *Server) preProcessAccountBlock(ctx context.Context, bh *chainhash.Hash,
 			return nil
 		}
 
-		err := types.IterateBlockOps(b, prev, fetchInputs, applyOp, s.chainParams)
+		err = types.IterateBlockOps(b, prev, fetchInputs, applyOp, s.chainParams)
 		if err != nil {
 			return err
 		}
