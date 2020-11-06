@@ -119,6 +119,7 @@ func mustHash(s string) chainhash.Hash {
 type mockChain struct {
 	t      *testing.T
 	noncer *rand.Rand
+	params *chaincfg.Params
 
 	mtx            sync.Mutex
 	blocks         map[chainhash.Hash]*wire.MsgBlock
@@ -145,6 +146,7 @@ func newMockChain(t *testing.T, params *chaincfg.Params) *mockChain {
 	m := &mockChain{
 		t:              t,
 		noncer:         rand.New(rand.NewSource(0xfafef1f0f00000)),
+		params:         params,
 		blocks:         make(map[chainhash.Hash]*wire.MsgBlock),
 		blocksByHeight: make(map[int64]*chainhash.Hash),
 		txByHash:       make(map[chainhash.Hash]*wire.MsgTx),
@@ -294,6 +296,7 @@ func (mc *mockChain) GetBlockChainInfo(ctx context.Context) (*chainjson.GetBlock
 		return mc.getBlockChainInfoHook(ctx)
 	}
 	return &chainjson.GetBlockChainInfoResult{
+		Chain:                mc.params.Name,
 		SyncHeight:           mc.tipHeight,
 		InitialBlockDownload: false,
 		Blocks:               mc.tipHeight,
@@ -374,19 +377,31 @@ func (mc *mockChain) NotifyBlocks(ctx context.Context) error {
 }
 
 func (mc *mockChain) GetInfo(ctx context.Context) (*chainjson.InfoChainResult, error) {
+	mc.mtx.Lock()
+	defer mc.mtx.Unlock()
+
 	if mc.getInfoHook != nil {
 		return mc.getInfoHook(ctx)
 	}
-	return nil, nil
+	return &chainjson.InfoChainResult{
+		TxIndex: true,
+	}, nil
 }
 
 func (mc *mockChain) Version(ctx context.Context) (map[string]chainjson.VersionResult, error) {
+	mc.mtx.Lock()
+	defer mc.mtx.Unlock()
+
 	if mc.versionHook != nil {
 		return mc.versionHook(ctx)
 	}
-	return nil, nil
+	return map[string]chainjson.VersionResult{
+		"dcrdjsonrpcapi": {Major: wantJsonRpcMajor, Minor: wantJsonRpcMinor},
+		"dcrd":           {},
+	}, nil
 }
 
 func (mc *mockChain) Connect(ctx context.Context, retry bool) error {
 	return nil
+}
 }
