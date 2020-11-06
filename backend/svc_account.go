@@ -163,6 +163,11 @@ func (s *Server) preProcessAccounts(ctx context.Context) error {
 		return err
 	}
 
+	// Ensure we're connected to a suitable dcrd instance.
+	if err := s.isDcrdActive(); err != nil {
+		return err
+	}
+
 	// Verify if the last processed block matches the block in the mainchain
 	// at startHeight. If it doesn't, we'll have to roll back due to a reorg
 	// that happened while we were offline.

@@ -404,4 +404,19 @@ func (mc *mockChain) Version(ctx context.Context) (map[string]chainjson.VersionR
 func (mc *mockChain) Connect(ctx context.Context, retry bool) error {
 	return nil
 }
+
+// newTestServer returns a Server instance that is forced into the connected
+// state, so that functions that depend on having a connected chain work.
+func newTestServer(t *testing.T, cfg *ServerConfig) *Server {
+	t.Helper()
+
+	svr, err := NewServer(context.Background(), cfg)
+	require.NoError(t, err)
+
+	// Force the server to be connected.
+	svr.mtx.Lock()
+	svr.dcrdActiveErr = nil
+	svr.mtx.Unlock()
+
+	return svr
 }

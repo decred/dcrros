@@ -71,11 +71,8 @@ func testBlockEndpoint(t *testing.T, db backenddb.DB) {
 		c:               c,
 		db:              db,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
-	err = svr.preProcessAccounts(testCtx(t))
+	svr := newTestServer(t, cfg)
+	err := svr.preProcessAccounts(testCtx(t))
 	require.NoError(t, err)
 
 	// Generate a block on the chain that isn't processed.

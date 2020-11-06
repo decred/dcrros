@@ -43,10 +43,7 @@ func TestConstructionDeriveEndpoint(t *testing.T) {
 		DBType:      dbTypePreconfigured,
 		c:           c,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	type testCase struct {
 		name     string
@@ -279,10 +276,7 @@ func TestConstructionPreprocessEndpoint(t *testing.T) {
 		DBType:      dbTypePreconfigured,
 		c:           c,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	type testCase struct {
 		name        string
@@ -354,10 +348,7 @@ func TestConstructionMetadataEndpoint(t *testing.T) {
 		DBType:      dbTypePreconfigured,
 		c:           c,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	type testCase struct {
 		name    string
@@ -534,10 +525,7 @@ func TestConstructionPayloadsEndpoint(t *testing.T) {
 		DBType:      dbTypePreconfigured,
 		c:           c,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	type testCase struct {
 		name         string
@@ -761,10 +749,7 @@ func TestConstructionParseEndpoint(t *testing.T) {
 		DBType:      dbTypePreconfigured,
 		c:           c,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	type testCase struct {
 		name        string
@@ -991,10 +976,7 @@ func TestConstructionCombine(t *testing.T) {
 		DBType:      dbTypePreconfigured,
 		c:           c,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	type genSig func(t *testing.T, tx *wire.MsgTx, i int) ([]byte, []byte)
 
@@ -1146,10 +1128,8 @@ func TestConstructionHashEndpoint(t *testing.T) {
 		DBType:      dbTypePreconfigured,
 		c:           c,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+
+	svr := newTestServer(t, cfg)
 
 	type testCase struct {
 		name       string
@@ -1223,10 +1203,7 @@ func TestConstructionSubmitEndpoint(t *testing.T) {
 		DBType:      dbTypePreconfigured,
 		c:           c,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	type testCase struct {
 		name       string

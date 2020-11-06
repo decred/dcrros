@@ -31,6 +31,11 @@ const (
 	wantJsonRpcMinor uint32 = 1
 )
 
+var (
+	errDcrdUnconnected = errors.New("dcrd instance not connected")
+	errDcrdUnsuitable  = errors.New("dcrd instance is unsuitable for dcrros operation")
+)
+
 // chain specifies the functions needed by a backing chain implementation (an
 // rpcclient.Client instance, a mock chain used for tests, etc).
 type chain interface {
@@ -144,7 +149,29 @@ func (s *Server) waitForBlockchainSync(ctx context.Context) error {
 			return fmt.Errorf("unable to get blockchain info from dcrd: %v", err)
 		}
 
-		if info.SyncHeight > 0 && !info.InitialBlockDownload && info.SyncHeight <= info.Blocks {
+		// Verify we're connected to a suitable dcrd node. We do this
+		// after calling GetBlockChainInfo() because that call might
+		// have triggered a reconnect.
+		if err := s.isDcrdActive(); err != nil {
+			if time.Since(lastLogTime) > time.Minute {
+				svrLog.Infof("Not connected to a suitable dcrd "+
+					"instance: %v", err)
+				lastLogTime = time.Now()
+			}
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Second):
+			}
+
+			continue
+		}
+
+		syncComplete := info.SyncHeight > 0 &&
+			!info.InitialBlockDownload &&
+			info.SyncHeight <= info.Blocks
+		if syncComplete {
 			svrLog.Infof("Blockchain sync complete at height %d",
 				info.Blocks)
 			return nil
@@ -211,6 +238,10 @@ func (s *Server) getBlock(ctx context.Context, bh *chainhash.Hash) (*wire.MsgBlo
 	bl, ok := s.cacheBlocks.Lookup(*bh)
 	if ok {
 		return bl.(*wire.MsgBlock), nil
+	}
+
+	if err := s.isDcrdActive(); err != nil {
+		return nil, err
 	}
 
 	b, err := s.c.GetBlock(ctx, bh)
@@ -307,6 +338,10 @@ func (s *Server) getBlockByPartialId(ctx context.Context, bli *rtypes.PartialBlo
 func (s *Server) getRawTx(ctx context.Context, txh *chainhash.Hash) (*wire.MsgTx, error) {
 	if tx, ok := s.cacheRawTxs.Lookup(*txh); ok {
 		return tx.(*wire.MsgTx), nil
+	}
+
+	if err := s.isDcrdActive(); err != nil {
+		return nil, err
 	}
 
 	tx, err := s.c.GetRawTransaction(ctx, txh)

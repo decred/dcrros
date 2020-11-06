@@ -58,6 +58,10 @@ func SupportedDBTypes() []DBType {
 	return []DBType{DBTypeMem, DBTypeBadger, DBTypeBadgerMem}
 }
 
+var (
+	errUnknownDBType = errors.New("unknown DB type")
+)
+
 type blockNtfnType int
 
 const (
@@ -115,7 +119,7 @@ type Server struct {
 
 	// The given mtx mutex protects the following fields.
 	mtx            sync.Mutex
-	active         bool
+	dcrdActiveErr  error
 	dcrdVersion    string
 	blockNtfns     []*blockNtfn
 	blockNtfnsChan chan struct{}
@@ -152,7 +156,7 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	case dbTypePreconfigured:
 		db = cfg.db
 	default:
-		err = errors.New("unknown db type")
+		err = errUnknownDBType
 	}
 	if err != nil {
 		return nil, err
@@ -172,6 +176,7 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		blockNtfnsChan: make(chan struct{}),
 		concurrency:    runtime.NumCPU(),
 		bcl:            &blocksConnectedLogger{lastTime: time.Now()},
+		dcrdActiveErr:  errDcrdUnconnected,
 	}
 
 	// Initialize connection to underlying dcrd node if an existing chain
@@ -194,32 +199,32 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 	return s, nil
 }
 
-func (s *Server) Active() bool {
+// isDcrdActive returns an error if the server is not connected to a suitable
+// underlying dcrd node.
+func (s *Server) isDcrdActive() error {
 	s.mtx.Lock()
-	active := s.active
+	dcrdActiveErr := s.dcrdActiveErr
 	s.mtx.Unlock()
-	return active
+	return dcrdActiveErr
 }
 
 func (s *Server) onDcrdConnected() {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
-	// Ideally these would be done on a onDcrdDisconnected() callback but
-	// rpcclient doesn't currently offer that.
-	s.active = false
-	s.dcrdVersion = ""
-
 	svrLog.Debugf("Reconnected to the dcrd instance")
 	version, err := checkDcrd(s.ctx, s.c, s.chainParams)
 	if err != nil {
-		svrLog.Error(err)
+		s.dcrdVersion = ""
+		s.dcrdActiveErr = errDcrdUnsuitable
+
+		svrLog.Errorf("Reconnected to unsuitable dcrd node: %v", err)
 		svrLog.Infof("Disabling server operations")
 		return
 	}
 
-	s.active = true
 	s.dcrdVersion = version
+	s.dcrdActiveErr = nil
 }
 
 func (s *Server) notifyNewBlockEvent() {
@@ -235,6 +240,11 @@ func (s *Server) onDcrdBlockConnected(blockHeader []byte, transactions [][]byte)
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
+	if s.dcrdActiveErr != nil {
+		svrLog.Debugf("Ignoring block connected from unsuitable dcrd node")
+		return
+	}
+
 	var header wire.BlockHeader
 	if err := header.FromBytes(blockHeader); err != nil {
 		svrLog.Errorf("Unable to decode blockheader on block connected: %v", err)
@@ -249,6 +259,11 @@ func (s *Server) onDcrdBlockConnected(blockHeader []byte, transactions [][]byte)
 func (s *Server) onDcrdBlockDisconnected(blockHeader []byte) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
+
+	if s.dcrdActiveErr != nil {
+		svrLog.Debugf("Ignoring block disconnected from unsuitable dcrd node")
+		return
+	}
 
 	var header wire.BlockHeader
 	if err := header.FromBytes(blockHeader); err != nil {
@@ -286,36 +301,42 @@ func (s *Server) Routers() []rserver.Router {
 // server's behavior is undefined.
 func (s *Server) Run(ctx context.Context) error {
 	go s.c.Connect(ctx, true)
-	time.Sleep(time.Millisecond * 100)
-
 	go s.bcl.run(ctx)
 
+	// Defer the cleanup func.
+	defer func() {
+		if s.dbType != dbTypePreconfigured {
+			err := s.db.Close()
+			if err != nil {
+				svrLog.Errorf("Unable to close DB: %v", err)
+			}
+		}
+	}()
+
+	// Wait until the dcrd and dcrros nodes are ready to function.
 	if err := s.waitForBlockchainSync(ctx); err != nil {
-		s.db.Close()
 		return err
 	}
-
-	err := s.preProcessAccounts(ctx)
-	if err != nil {
-		s.db.Close()
+	if err := s.preProcessAccounts(ctx); err != nil {
 		return err
 	}
 
 	// Now that we've processed the accounts, we can register for block
 	// notifications.
 	if err := s.c.NotifyBlocks(ctx); err != nil {
-		s.db.Close()
 		return err
 	}
+
 	svrLog.Infof("Waiting for block notifications")
 
 	// Handle server events.
+	var err error
 nextevent:
 	for {
 		select {
 		case <-ctx.Done():
 			err = ctx.Err()
-			break nextevent
+			return err
 
 		case <-s.blockNtfnsChan:
 			s.mtx.Lock()
@@ -343,17 +364,8 @@ nextevent:
 			}
 
 			if err != nil {
-				break nextevent
+				return err
 			}
 		}
 	}
-
-	if s.dbType != dbTypePreconfigured {
-		closeErr := s.db.Close()
-		if closeErr != nil {
-			svrLog.Errorf("Unable to close DB: %v", closeErr)
-		}
-	}
-
-	return err
 }

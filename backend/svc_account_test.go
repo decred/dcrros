@@ -206,14 +206,10 @@ func testPreprocessesAccounts(t *testing.T, db backenddb.DB) {
 		c:           c,
 		db:          db,
 	}
-
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	// Preprocess accounts.
-	err = svr.preProcessAccounts(testCtx(t))
+	err := svr.preProcessAccounts(testCtx(t))
 	require.NoError(t, err)
 
 	// Verify the historical balance at each block.
@@ -262,13 +258,10 @@ func testPreprocessesGenesis(t *testing.T, db backenddb.DB) {
 		c:           c,
 		db:          db,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	// Preprocess.
-	err = svr.preProcessAccounts(testCtx(t))
+	err := svr.preProcessAccounts(testCtx(t))
 	require.NoError(t, err)
 }
 
@@ -300,17 +293,14 @@ func testPreprocessesAfterRestart(t *testing.T, db backenddb.DB) {
 		c:           c,
 		db:          db,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	// Generate a chain that funds an account.
 	c.extendTip(toAddr(11, 1))
 	c.extendTip(fromAddr(5, 1))
 
 	// Preprocess.
-	err = svr.preProcessAccounts(testCtx(t))
+	err := svr.preProcessAccounts(testCtx(t))
 	require.NoError(t, err)
 
 	// Account balance should be correct.
@@ -415,10 +405,7 @@ func testReorgDuringPreprocess(t *testing.T, db backenddb.DB) {
 		c:           c,
 		db:          db,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	// Override concurrency to ensure multiple blocks are requested
 	// concurrently during preprocessing.
@@ -465,7 +452,7 @@ func testReorgDuringPreprocess(t *testing.T, db backenddb.DB) {
 	}
 
 	// Preprocess.
-	err = svr.preProcessAccounts(testCtx(t))
+	err := svr.preProcessAccounts(testCtx(t))
 	require.NoError(t, err)
 
 	// Account balance should be the reorged-in balance.

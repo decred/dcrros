@@ -29,10 +29,7 @@ func TestMempoolEndpoint(t *testing.T) {
 		DBType:      dbTypePreconfigured,
 		c:           c,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	// Create a few dummy transactions.
 	tx1 := c.addSudoTx(1, []byte{})
@@ -107,10 +104,7 @@ func TestMempoolTransactionEndpoint(t *testing.T) {
 		DBType:      dbTypePreconfigured,
 		c:           c,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	// Create a transaction which input we'll spend in the mempool. This is
 	// needed because during processing all inputs for a mempool tx are

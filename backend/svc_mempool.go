@@ -35,6 +35,10 @@ func (s *Server) Mempool(ctx context.Context, req *rtypes.NetworkRequest) (*rtyp
 
 func (s *Server) MempoolTransaction(ctx context.Context, req *rtypes.MempoolTransactionRequest) (*rtypes.MempoolTransactionResponse, *rtypes.Error) {
 
+	if err := s.isDcrdActive(); err != nil {
+		return nil, types.ErrChainUnavailable.Msg(err.Error()).RError()
+	}
+
 	var txh chainhash.Hash
 	err := chainhash.Decode(&txh, req.TransactionIdentifier.Hash)
 	if err != nil {

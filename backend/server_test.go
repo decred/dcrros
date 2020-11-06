@@ -15,23 +15,72 @@ import (
 	"decred.org/dcrros/backend/backenddb"
 	"decred.org/dcrros/backend/internal/memdb"
 	"github.com/decred/dcrd/chaincfg/v3"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
+	"github.com/decred/dcrd/wire"
 	"github.com/stretchr/testify/require"
 )
+
+// TestOnDcrdConnected ensures the onDcrdConnected handler behaves as expected
+// when (re-)connection is done.
+func TestOnDcrdConnected(t *testing.T) {
+	// Initialize the server.
+	params := chaincfg.RegNetParams()
+	otherParams := chaincfg.MainNetParams()
+
+	c := newMockChain(t, params)
+	cfg := &ServerConfig{
+		ChainParams: params,
+		DBType:      dbTypePreconfigured,
+		c:           c,
+	}
+	svr, err := NewServer(context.Background(), cfg)
+	require.NoError(t, err)
+
+	// Server starts out disconnected.
+	wantErr := errDcrdUnconnected
+	if err := svr.isDcrdActive(); !errors.Is(err, wantErr) {
+		t.Fatalf("unexpected isDcrdActive error. want=%v got=%v",
+			wantErr, err)
+	}
+
+	// First connection to a suitable chain clears the connection error.
+	svr.onDcrdConnected()
+	wantErr = nil
+	if err := svr.isDcrdActive(); !errors.Is(err, wantErr) {
+		t.Fatalf("unexpected isDcrdActive error. want=%v got=%v",
+			wantErr, err)
+	}
+
+	// Connecting to an unsuitable chain throws an error. Easiest way to
+	// force an unsuitable dcrd is to change the network.
+	c.params = otherParams
+	svr.onDcrdConnected()
+	wantErr = errDcrdUnsuitable
+	if err := svr.isDcrdActive(); !errors.Is(err, wantErr) {
+		t.Fatalf("unexpected isDcrdActive error. want=%v got=%v",
+			wantErr, err)
+	}
+
+	// Finally, reconnecting to a suitable chain clears the error back.
+	c.params = params
+	svr.onDcrdConnected()
+	wantErr = nil
+	if err := svr.isDcrdActive(); !errors.Is(err, wantErr) {
+		t.Fatalf("unexpected isDcrdActive error. want=%v got=%v",
+			wantErr, err)
+	}
+
+}
 
 // TestServerProcessesNotifications ensures the server processes notifications
 // as they are received from the blockchain.
 func TestServerProcessesNotifications(t *testing.T) {
+	t.Parallel()
+
 	params := chaincfg.SimNetParams()
+	otherParams := chaincfg.RegNetParams()
 	c := newMockChain(t, params)
 
 	c.extendTip()
-	c.getBlockChainInfoHook = func(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error) {
-		return &chainjson.GetBlockChainInfoResult{
-			SyncHeight: 1,
-			Blocks:     1,
-		}, nil
-	}
 
 	// Initialize server.
 	db, err := memdb.NewMemDB()
@@ -44,8 +93,7 @@ func TestServerProcessesNotifications(t *testing.T) {
 	}
 	ctxt, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	// Helpful functions to drive the server forward.
 	tipHeader := func() []byte {
@@ -67,6 +115,9 @@ func TestServerProcessesNotifications(t *testing.T) {
 		c.rewindChain(1)
 		return prevHeader
 	}
+	hdr := &wire.BlockHeader{}
+	blankHeader, err := hdr.Bytes()
+	require.NoError(t, err)
 
 	// Run the server.
 	runResult := make(chan error)
@@ -81,6 +132,34 @@ func TestServerProcessesNotifications(t *testing.T) {
 	// Send a bunch of block connect/disconnect events.
 	svr.onDcrdBlockConnected(extendTip(), nil)
 	svr.onDcrdBlockConnected(extendTip(), nil)
+
+	// Wait until Run processed the events.
+	time.Sleep(100 * time.Millisecond)
+
+	// Simulate a reconnection to an unsuitable dcrd instance.
+	c.mtx.Lock()
+	c.params = otherParams
+	c.mtx.Unlock()
+	svr.onDcrdConnected()
+
+	// Attempt to send notification with bogus headers.
+	svr.onDcrdBlockConnected(blankHeader, nil)
+	svr.onDcrdBlockDisconnected(blankHeader)
+
+	// Server should still be running.
+	select {
+	case err := <-runResult:
+		t.Fatalf("unexpected run error: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Reconnect to the right chain.
+	c.mtx.Lock()
+	c.params = params
+	c.mtx.Unlock()
+	svr.onDcrdConnected()
+
+	// Perform additional block events.
 	svr.onDcrdBlockDisconnected(rewindTip())
 	svr.onDcrdBlockConnected(extendTip(), nil)
 	svr.onDcrdBlockConnected(extendTip(), nil)
@@ -108,9 +187,28 @@ func TestServerProcessesNotifications(t *testing.T) {
 	}()
 }
 
+// TestNewErrorsUnknownDBType ensures NewServer fails when passed an unknown DB
+// type.
+func TestNewErrorsUnknownDBType(t *testing.T) {
+	params := chaincfg.SimNetParams()
+	c := newMockChain(t, params)
+	cfg := &ServerConfig{
+		ChainParams: params,
+		DBType:      DBType("*booo"),
+		c:           c,
+	}
+	_, err := NewServer(context.Background(), cfg)
+	wantErr := errUnknownDBType
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("unexpected error. want=%v, got=%v", wantErr, err)
+	}
+}
+
 // TestRunsAllDBTypes ensures all exported DB types can be used when creating
 // and running a server.
 func TestRunsAllDBTypes(t *testing.T) {
+	t.Parallel()
+
 	params := chaincfg.SimNetParams()
 	c := newMockChain(t, params)
 	c.extendTip()
@@ -118,6 +216,8 @@ func TestRunsAllDBTypes(t *testing.T) {
 	for _, dbtype := range SupportedDBTypes() {
 		dbtype := dbtype
 		t.Run(string(dbtype), func(t *testing.T) {
+			t.Parallel()
+
 			tmpDir, err := ioutil.TempDir("", string(dbtype))
 			require.NoError(t, err)
 			t.Cleanup(func() { os.RemoveAll(tmpDir) })
@@ -130,8 +230,7 @@ func TestRunsAllDBTypes(t *testing.T) {
 				c:           c,
 			}
 			ctxt, cancel := context.WithCancel(context.Background())
-			svr, err := NewServer(ctxt, cfg)
-			require.NoError(t, err)
+			svr := newTestServer(t, cfg)
 
 			// runDone will receive the result of the Run() call.
 			runDone := make(chan error)

@@ -21,6 +21,8 @@ import (
 // TestProcessSequentialBlocks ensures the processSequentialBlocks function
 // behaves correctly even when blocks are fetched out of order.
 func TestProcessSequentialBlocks(t *testing.T) {
+	t.Parallel()
+
 	params := chaincfg.RegNetParams()
 	c := newMockChain(t, params)
 
@@ -35,10 +37,7 @@ func TestProcessSequentialBlocks(t *testing.T) {
 		DBType:      dbTypePreconfigured,
 		c:           c,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	// Override concurrency to ensure multiple blocks are requested
 	// concurrently during preprocessing.
@@ -77,6 +76,8 @@ func TestProcessSequentialBlocks(t *testing.T) {
 }
 
 func testHandlesBlockNotifications(t *testing.T, db backenddb.DB) {
+	t.Parallel()
+
 	params := chaincfg.RegNetParams()
 	c := newMockChain(t, params)
 
@@ -101,10 +102,7 @@ func testHandlesBlockNotifications(t *testing.T, db backenddb.DB) {
 		c:           c,
 		db:          db,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	// Helpful functions to drive the server forward.
 	tipHeader := func() *wire.BlockHeader {
@@ -150,7 +148,7 @@ func testHandlesBlockNotifications(t *testing.T, db backenddb.DB) {
 	c.extendTip(fromAddr(5, 1))
 
 	// Preprocess.
-	err = svr.preProcessAccounts(testCtx(t))
+	err := svr.preProcessAccounts(testCtx(t))
 	require.NoError(t, err)
 
 	// Account balance should be correct.

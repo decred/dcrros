@@ -25,10 +25,7 @@ func TestNetworkListEndpoint(t *testing.T) {
 		DBType:      dbTypePreconfigured,
 		c:           c,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	// Execute the NetworkList call.
 	res, rerr := svr.NetworkList(context.Background(), nil)
@@ -63,10 +60,7 @@ func TestNetworkOptionsEndpoint(t *testing.T) {
 		DBType:      dbTypePreconfigured,
 		c:           c,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	// Execute the NetworkOptions call.
 	res, rerr := svr.NetworkOptions(context.Background(), nil)
@@ -94,10 +88,7 @@ func testNetworkStatusEndpoint(t *testing.T, db backenddb.DB) {
 		c:           c,
 		db:          db,
 	}
-	ctxt, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
-	require.NoError(t, err)
+	svr := newTestServer(t, cfg)
 
 	// Shorter function names to improve readability.
 	assertTip := func(hash *chainhash.Hash, index int64) {
@@ -131,7 +122,7 @@ func testNetworkStatusEndpoint(t *testing.T, db backenddb.DB) {
 	assertTip(&params.GenesisHash, 0)
 
 	// Preprocess the mock chain and generate an unprocessed block.
-	err = svr.preProcessAccounts(testCtx(t))
+	err := svr.preProcessAccounts(testCtx(t))
 	require.NoError(t, err)
 	c.mtx.Lock()
 	lastHash := c.tipHash

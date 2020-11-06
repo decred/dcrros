@@ -183,6 +183,8 @@ func TestCheckDcrd(t *testing.T) {
 // TestWaitsForBlockchainSync asserts that the function that waits for
 // blockchain sync behaves correctly.
 func TestWaitsForBlockchainSync(t *testing.T) {
+	t.Parallel()
+
 	mainnet := chaincfg.MainNetParams()
 	simnet := chaincfg.SimNetParams()
 
@@ -276,9 +278,7 @@ func TestWaitsForBlockchainSync(t *testing.T) {
 		// getblockchaininfo call.
 		ctxt, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		t.Cleanup(cancel)
-
-		svr, err := NewServer(ctxt, cfg)
-		require.NoError(t, err)
+		svr := newTestServer(t, cfg)
 
 		// Keep track of how many times the hook was called to assert
 		// it actually was called. Needs to be atomic due to being
@@ -321,6 +321,65 @@ func TestWaitsForBlockchainSync(t *testing.T) {
 	}
 }
 
+// TestWaitsForBlockchainSyncWrongNet asserts that the function that waits for
+// blockchain sync behaves correctly when the underlying dcrd instance changes
+// to an unsuitable node.
+func TestWaitsForBlockchainSyncWrongNet(t *testing.T) {
+	t.Parallel()
+
+	mainnet := chaincfg.MainNetParams()
+	simnet := chaincfg.SimNetParams()
+
+	// Initialize server.
+	c := newMockChain(t, mainnet)
+	c.extendTip()
+
+	cfg := &ServerConfig{
+		ChainParams: mainnet,
+		DBType:      dbTypePreconfigured,
+		c:           c,
+	}
+	svr := newTestServer(t, cfg)
+
+	// Switch the chain to simnet to simulate a connection to a node in a
+	// different chain.
+	c.mtx.Lock()
+	c.params = simnet
+	c.mtx.Unlock()
+	svr.onDcrdConnected()
+
+	// Run waitForBlockchainSync in a different goroutine and wait
+	// for it to return.
+	ctxt, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	waitSyncResult := make(chan error)
+	go func() {
+		waitSyncResult <- svr.waitForBlockchainSync(ctxt)
+	}()
+
+	// Shouldn't be done with the wait yet.
+	select {
+	case err := <-waitSyncResult:
+		t.Fatalf("unexpected error: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Go back to the correct network.
+	c.mtx.Lock()
+	c.params = mainnet
+	c.mtx.Unlock()
+	svr.onDcrdConnected()
+
+	// The wait should now complete without errors.
+	select {
+	case err := <-waitSyncResult:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+	}
+}
+
 // TestGetBlockCache tests the behavior of the getBlock function with the
 // presence/absence of cache.
 func TestGetBlockCache(t *testing.T) {
@@ -345,10 +404,7 @@ func TestGetBlockCache(t *testing.T) {
 			CacheSizeBlocks: testSize,
 		}
 		ctxb := context.Background()
-		ctxt, cancel := context.WithCancel(ctxb)
-		t.Cleanup(cancel)
-		svr, err := NewServer(ctxt, cfg)
-		require.NoError(t, err)
+		svr := newTestServer(t, cfg)
 
 		// Request every block twice.
 		for i := 0; i < 2; i++ {
@@ -363,7 +419,7 @@ func TestGetBlockCache(t *testing.T) {
 		}
 
 		// Request a block that does not exist.
-		_, err = svr.getBlock(ctxb, &chainhash.Hash{})
+		_, err := svr.getBlock(ctxb, &chainhash.Hash{})
 		wantErr := types.ErrBlockNotFound
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("unexpected error. want=%v got=%v", wantErr,

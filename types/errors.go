@@ -58,6 +58,7 @@ const (
 	ErrIncorrectSigSize
 	ErrInvalidSig
 	ErrInvalidPubKey
+	ErrChainUnavailable
 
 	// This MUST be the last member.
 	nbErrorCodes
@@ -96,6 +97,7 @@ var errorCodeMsgs = map[ErrorCode]string{
 	ErrIncorrectSigSize:          "incorrect signature size",
 	ErrInvalidSig:                "invalid signature",
 	ErrInvalidPubKey:             "invalid public key",
+	ErrChainUnavailable:          "chain unavailable",
 }
 
 // Error returns the default error message for the given error code.
