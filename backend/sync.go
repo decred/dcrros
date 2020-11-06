@@ -199,6 +199,20 @@ func (s *Server) handleBlockConnected(ctx context.Context, header *wire.BlockHea
 
 	svrLog.Debugf("Received connected block %s at height %d", chainHash, chainHeight)
 
+	// If we received a block connected notification for a height lower
+	// than we currently are, ignore it. It's likely we're in the middle of
+	// a reorg, so we'll switch to the new chain once a longer one is
+	// received.
+	_, tipHeight, err := s.lastProcessedBlock(ctx)
+	if err != nil {
+		return err
+	}
+	if chainHeight < tipHeight {
+		svrLog.Debugf("Ignoring block connected %s at height lower than "+
+			"current tip (%d < %d)", chainHash, chainHeight, tipHeight)
+		return nil
+	}
+
 	// Fetch the full block.
 	b, err := s.getBlock(ctx, &chainHash)
 	if err != nil {

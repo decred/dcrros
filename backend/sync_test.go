@@ -269,7 +269,9 @@ func testHandlesBlockNotifications(t *testing.T, db backenddb.DB) {
 	}, {
 		name: "connect header from inexistent block",
 		test: func() {
-			var header wire.BlockHeader
+			header := wire.BlockHeader{
+				Height: uint32(c.tipHeight) + 1,
+			}
 			h1 := extendTip(toAddr(3, 1))
 			connectHeader(h1)
 
@@ -293,6 +295,16 @@ func testHandlesBlockNotifications(t *testing.T, db backenddb.DB) {
 			assertServerTip(h1.BlockHash())
 		},
 		wantBalance: 39,
+	}, {
+		name: "connect a block that was already connected",
+		test: func() {
+			h1 := extendTip(toAddr(3, 1))
+			h2 := extendTip(fromAddr(19, 1))
+			connectHeader(h1)
+			connectHeader(h2)
+			connectHeader(h1)
+		},
+		wantBalance: 23,
 	}}
 
 	for _, tc := range testCases {
