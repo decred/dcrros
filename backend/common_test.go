@@ -407,15 +407,21 @@ func (mc *mockChain) Connect(ctx context.Context, retry bool) error {
 
 // newTestServer returns a Server instance that is forced into the connected
 // state, so that functions that depend on having a connected chain work.
+//
+// The internal context used for notifications is set to a context which is
+// canceled during the test cleanup phase.
 func newTestServer(t *testing.T, cfg *ServerConfig) *Server {
 	t.Helper()
 
-	svr, err := NewServer(context.Background(), cfg)
+	ctxt, cancel := context.WithCancel(context.Background())
+	svr, err := NewServer(ctxt, cfg)
 	require.NoError(t, err)
+	t.Cleanup(cancel)
 
 	// Force the server to be connected.
 	svr.mtx.Lock()
 	svr.dcrdActiveErr = nil
+	svr.ctx = ctxt
 	svr.mtx.Unlock()
 
 	return svr

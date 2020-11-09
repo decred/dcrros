@@ -59,7 +59,8 @@ func SupportedDBTypes() []DBType {
 }
 
 var (
-	errUnknownDBType = errors.New("unknown DB type")
+	errUnknownDBType  = errors.New("unknown DB type")
+	errRunCalledTwice = errors.New("cannot run a server instance twice")
 )
 
 type blockNtfnType int
@@ -99,7 +100,6 @@ type ServerConfig struct {
 // implementation) _only_ generates valid chain data.
 type Server struct {
 	c           chain
-	ctx         context.Context
 	chainParams *chaincfg.Params
 	asserter    *asserter.Asserter
 	network     *rtypes.NetworkIdentifier
@@ -123,6 +123,7 @@ type Server struct {
 	dcrdVersion    string
 	blockNtfns     []*blockNtfn
 	blockNtfnsChan chan struct{}
+	ctx            context.Context
 }
 
 // NewServer creates a new server instance.
@@ -167,7 +168,6 @@ func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
 		chainParams:    cfg.ChainParams,
 		asserter:       astr,
 		network:        network,
-		ctx:            ctx,
 		cacheBlocks:    &cacheBlocks,
 		cacheRawTxs:    &cacheRawTxs,
 		db:             db,
@@ -208,6 +208,8 @@ func (s *Server) isDcrdActive() error {
 	return dcrdActiveErr
 }
 
+// onDcrdConnected is called when the underlying chain implementation connected
+// (or reconnected) to a dcrd instance.
 func (s *Server) onDcrdConnected() {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -227,15 +229,26 @@ func (s *Server) onDcrdConnected() {
 	s.dcrdActiveErr = nil
 }
 
+// notifyNewBlockEvent asynchronously signals the main Run() goroutine that new
+// block notifications have arrived.
+//
+// This must be called with the server lock held.
 func (s *Server) notifyNewBlockEvent() {
+	ctx := s.ctx
+
 	go func() {
 		select {
-		case <-s.ctx.Done():
+		case <-ctx.Done():
 		case s.blockNtfnsChan <- struct{}{}:
 		}
 	}()
 }
 
+// onDcrdBlockConnected is called when new blocks are connected to the main
+// dcrd chain of the underlying chain implementation.
+//
+// This may be called by the main rpcclient goroutine so it must not block for
+// long periods of time and cannot call chain functions itself.
 func (s *Server) onDcrdBlockConnected(blockHeader []byte, transactions [][]byte) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -256,6 +269,11 @@ func (s *Server) onDcrdBlockConnected(blockHeader []byte, transactions [][]byte)
 	s.notifyNewBlockEvent()
 }
 
+// onDcrdBlockDisconnected is called when new blocks are disconnected from the
+// main dcrd chain of the underlying chain implementation.
+//
+// This may be called by the main rpcclient goroutine so it must not block for
+// long periods of time and cannot call chain functions itself.
 func (s *Server) onDcrdBlockDisconnected(blockHeader []byte) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -300,6 +318,23 @@ func (s *Server) Routers() []rserver.Router {
 // NOTE: the passed context MUST be the same one passed for New() otherwise the
 // server's behavior is undefined.
 func (s *Server) Run(ctx context.Context) error {
+	// We rely on ctx being non-nil for duplicate Run() execution
+	// detection.
+	if ctx == nil {
+		return errors.New("ctx is required on Run()")
+	}
+
+	// Prevent running twice and store the server context needed during
+	// notifications.
+	s.mtx.Lock()
+	if s.ctx != nil {
+		s.mtx.Unlock()
+		return errRunCalledTwice
+	}
+	s.ctx = ctx
+	s.mtx.Unlock()
+
+	// Run the helper goroutines.
 	go s.c.Connect(ctx, true)
 	go s.bcl.run(ctx)
 

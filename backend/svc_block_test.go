@@ -153,7 +153,7 @@ func testBlockEndpoint(t *testing.T, db backenddb.DB) {
 
 	// Actual test function.
 	test := func(t *testing.T, tc *testCase) {
-		t.Parallel()
+		//t.Parallel()
 		res, rerr := svr.Block(context.Background(), tc.req)
 		if !types.RosettaErrorIs(rerr, tc.wantErr) {
 			t.Fatalf("unexpected error. want=%v got=%v",

@@ -150,7 +150,7 @@ func (s *Server) reorgToParentOf(ctx context.Context, bh *chainhash.Hash,
 		}
 
 		// Process the accounts modified by the block.
-		err = s.preProcessAccountBlock(s.ctx, nextTipHash, b, prev, nil)
+		err = s.preProcessAccountBlock(ctx, nextTipHash, b, prev, nil)
 		if err != nil {
 			return nil, fmt.Errorf("unable to process accounts of connected block "+
 				"%s: %v", nextTipHash, err)
@@ -178,7 +178,7 @@ func (s *Server) switchChainTo(ctx context.Context, bh *chainhash.Hash,
 	}
 
 	// Process the accounts modified by the block.
-	err = s.preProcessAccountBlock(s.ctx, bh, b, prev, utxoSet)
+	err = s.preProcessAccountBlock(ctx, bh, b, prev, utxoSet)
 	if err != nil {
 		return fmt.Errorf("unable to process accounts of connected block "+
 			"%s (height %d): %v", bh, b.Header.Height, err)
@@ -225,7 +225,7 @@ func (s *Server) handleBlockConnected(ctx context.Context, header *wire.BlockHea
 
 func (s *Server) handleBlockDisconnected(ctx context.Context, header *wire.BlockHeader) error {
 	blockHash := header.BlockHash()
-	err := s.db.Update(s.ctx, func(dbtx backenddb.WriteTx) error {
+	err := s.db.Update(ctx, func(dbtx backenddb.WriteTx) error {
 		// Ensure our current tip matches the chain rolled back by the
 		// disconnected block.
 		tipHash, tipHeight, err := s.db.LastProcessedBlock(dbtx)
