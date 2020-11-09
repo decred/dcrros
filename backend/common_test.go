@@ -414,7 +414,7 @@ func newTestServer(t *testing.T, cfg *ServerConfig) *Server {
 	t.Helper()
 
 	ctxt, cancel := context.WithCancel(context.Background())
-	svr, err := NewServer(ctxt, cfg)
+	svr, err := NewServer(cfg)
 	require.NoError(t, err)
 	t.Cleanup(cancel)
 

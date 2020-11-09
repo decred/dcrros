@@ -127,7 +127,7 @@ type Server struct {
 }
 
 // NewServer creates a new server instance.
-func NewServer(ctx context.Context, cfg *ServerConfig) (*Server, error) {
+func NewServer(cfg *ServerConfig) (*Server, error) {
 	network := &rtypes.NetworkIdentifier{
 		Blockchain: "decred",
 		Network:    cfg.ChainParams.Name,

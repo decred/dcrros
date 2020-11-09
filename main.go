@@ -178,7 +178,7 @@ func _main() error {
 	}
 
 	// Create and start the backend Rosetta server.
-	drsvr, err := backend.NewServer(ctx, svrCfg)
+	drsvr, err := backend.NewServer(svrCfg)
 	if err != nil {
 		requestShutdown()
 		wg.Wait()

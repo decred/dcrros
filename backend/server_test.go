@@ -32,7 +32,7 @@ func TestOnDcrdConnected(t *testing.T) {
 		DBType:      dbTypePreconfigured,
 		c:           c,
 	}
-	svr, err := NewServer(context.Background(), cfg)
+	svr, err := NewServer(cfg)
 	require.NoError(t, err)
 
 	// Server starts out disconnected.
@@ -93,7 +93,7 @@ func TestServerProcessesNotifications(t *testing.T) {
 	}
 	ctxt, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	svr, err := NewServer(ctxt, cfg)
+	svr, err := NewServer(cfg)
 	require.NoError(t, err)
 	t.Cleanup(cancel)
 
@@ -199,7 +199,7 @@ func TestNewErrorsUnknownDBType(t *testing.T) {
 		DBType:      DBType("*booo"),
 		c:           c,
 	}
-	_, err := NewServer(context.Background(), cfg)
+	_, err := NewServer(cfg)
 	wantErr := errUnknownDBType
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("unexpected error. want=%v, got=%v", wantErr, err)
@@ -232,7 +232,7 @@ func TestRunsAllDBTypes(t *testing.T) {
 				c:           c,
 			}
 			ctxt, cancel := context.WithCancel(context.Background())
-			svr, err := NewServer(ctxt, cfg)
+			svr, err := NewServer(cfg)
 			require.NoError(t, err)
 
 			// runDone will receive the result of the Run() call.
@@ -315,7 +315,7 @@ func TestRunAPI(t *testing.T) {
 	}
 
 	t.Run("passing nil context errors", func(t *testing.T) {
-		svr, err := NewServer(context.Background(), cfg)
+		svr, err := NewServer(cfg)
 		require.NoError(t, err)
 		err = runWithErr(t, svr, nil)
 		if err == nil {
@@ -324,7 +324,7 @@ func TestRunAPI(t *testing.T) {
 	})
 
 	t.Run("passing done context errors", func(t *testing.T) {
-		svr, err := NewServer(context.Background(), cfg)
+		svr, err := NewServer(cfg)
 		require.NoError(t, err)
 		ctxt, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -337,7 +337,7 @@ func TestRunAPI(t *testing.T) {
 
 	t.Run("call run twice errors", func(t *testing.T) {
 		ctxt, cancel := context.WithCancel(context.Background())
-		svr, err := NewServer(context.Background(), cfg)
+		svr, err := NewServer(cfg)
 		require.NoError(t, err)
 
 		// First Run() call should work.
