@@ -7,6 +7,7 @@ package backend
 import (
 	"context"
 	"runtime"
+	"strconv"
 
 	"decred.org/dcrros/internal/version"
 	"decred.org/dcrros/types"
@@ -78,6 +79,23 @@ func (s *Server) NetworkStatus(ctx context.Context, req *rtypes.NetworkRequest) 
 
 	// Rosetta timestamp is in milliseconds.
 	timestamp := block.Header.Timestamp.Unix() * 1000
+
+	peers, err := s.c.GetPeerInfo(ctx)
+	if err != nil {
+		return nil, types.RError(err)
+	}
+	rpeers := make([]*rtypes.Peer, len(peers))
+	for i, p := range peers {
+		rpeers[i] = &rtypes.Peer{
+			PeerID: strconv.FormatInt(int64(p.ID), 10),
+			Metadata: map[string]interface{}{
+				"addr":      p.Addr,
+				"inbound":   p.Inbound,
+				"conn_time": p.ConnTime,
+			},
+		}
+	}
+
 	return &rtypes.NetworkStatusResponse{
 		CurrentBlockIdentifier: &rtypes.BlockIdentifier{
 			Hash:  hash.String(),
@@ -87,8 +105,6 @@ func (s *Server) NetworkStatus(ctx context.Context, req *rtypes.NetworkRequest) 
 		GenesisBlockIdentifier: &rtypes.BlockIdentifier{
 			Hash: s.chainParams.GenesisHash.String(),
 		},
-
-		// TODO: syncing peers?
-		Peers: nil,
+		Peers: rpeers,
 	}, nil
 }

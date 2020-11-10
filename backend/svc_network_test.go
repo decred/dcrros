@@ -6,11 +6,15 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"decred.org/dcrros/backend/backenddb"
+	"decred.org/dcrros/backend/internal/memdb"
+	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -151,4 +155,111 @@ func testNetworkStatusEndpoint(t *testing.T, db backenddb.DB) {
 
 func TestNetworkStatusEndpoint(t *testing.T) {
 	testDbInstances(t, true, testNetworkStatusEndpoint)
+}
+
+// TestNetworkStatusPeers verifies peers are returned correctly by the
+// /network/status endpoint.
+func TestNetworkStatusPeers(t *testing.T) {
+	params := chaincfg.RegNetParams()
+	c := newMockChain(t, params)
+
+	// Initialize the server and process the blockchain.
+	db, err := memdb.NewMemDB()
+	require.NoError(t, err)
+	cfg := &ServerConfig{
+		ChainParams: params,
+		DBType:      dbTypePreconfigured,
+		c:           c,
+		db:          db,
+	}
+	svr := newTestServer(t, cfg)
+
+	type testCase struct {
+		name      string
+		peers     []chainjson.GetPeerInfoResult
+		err       error
+		wantPeers []*rtypes.Peer
+	}
+
+	testCases := []testCase{{
+		name:      "no peers",
+		peers:     []chainjson.GetPeerInfoResult{},
+		wantPeers: []*rtypes.Peer{},
+	}, {
+		name: "one peer",
+		peers: []chainjson.GetPeerInfoResult{{
+			ID:       1,
+			Addr:     "addr1",
+			ConnTime: 20,
+		}},
+		wantPeers: []*rtypes.Peer{{
+			PeerID: "1",
+			Metadata: map[string]interface{}{
+				"addr":      "addr1",
+				"inbound":   false,
+				"conn_time": int64(20),
+			},
+		}},
+	}, {
+		name: "multiple peers",
+		peers: []chainjson.GetPeerInfoResult{{
+			ID:       1,
+			Addr:     "addr1",
+			ConnTime: 20,
+		}, {
+			ID:       10,
+			Addr:     "addr10",
+			ConnTime: 200,
+			Inbound:  true,
+		}},
+		wantPeers: []*rtypes.Peer{{
+			PeerID: "1",
+			Metadata: map[string]interface{}{
+				"addr":      "addr1",
+				"inbound":   false,
+				"conn_time": int64(20),
+			},
+		}, {
+			PeerID: "10",
+			Metadata: map[string]interface{}{
+				"addr":      "addr10",
+				"inbound":   true,
+				"conn_time": int64(200),
+			},
+		}},
+	}, {
+		name: "errored",
+		err:  errors.New("foo"),
+	}}
+
+	test := func(t *testing.T, tc *testCase) {
+		c.getPeerInfoHook = func(ctx context.Context) ([]chainjson.GetPeerInfoResult, error) {
+			return tc.peers, tc.err
+		}
+
+		res, rerr := svr.NetworkStatus(testCtx(t), &rtypes.NetworkRequest{})
+		if tc.err != nil {
+			if rerr == nil {
+				t.Fatalf("unexpected error. want=%v, got=%v",
+					tc.err, rerr)
+			}
+
+			return
+		}
+		require.Nil(t, rerr)
+		require.Len(t, res.Peers, len(tc.wantPeers))
+
+		for i, want := range tc.wantPeers {
+			got := res.Peers[i]
+			require.Equal(t, want.PeerID, got.PeerID)
+			require.Equal(t, want.Metadata["addr"], got.Metadata["addr"])
+			require.Equal(t, want.Metadata["inbound"], got.Metadata["inbound"])
+			require.Equal(t, want.Metadata["conn_time"], got.Metadata["conn_time"])
+		}
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) { test(t, &tc) })
+	}
 }

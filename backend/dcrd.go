@@ -50,6 +50,7 @@ type chain interface {
 	GetInfo(ctx context.Context) (*chainjson.InfoChainResult, error)
 	Version(ctx context.Context) (map[string]chainjson.VersionResult, error)
 	Connect(ctx context.Context, retry bool) error
+	GetPeerInfo(ctx context.Context) ([]chainjson.GetPeerInfoResult, error)
 }
 
 // checkDcrd verifies whether the specified dcrd instance fulfills the required

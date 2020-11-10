@@ -138,6 +138,7 @@ type mockChain struct {
 	versionHook            func(ctx context.Context) (map[string]chainjson.VersionResult, error)
 	getRawMempoolHook      func(ctx context.Context, txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error)
 	sendRawTransactionHook func(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
+	getPeerInfoHook        func(ctx context.Context) ([]chainjson.GetPeerInfoResult, error)
 }
 
 type blockMangler func(b *wire.MsgBlock)
@@ -403,6 +404,17 @@ func (mc *mockChain) Version(ctx context.Context) (map[string]chainjson.VersionR
 
 func (mc *mockChain) Connect(ctx context.Context, retry bool) error {
 	return nil
+}
+
+func (mc *mockChain) GetPeerInfo(ctx context.Context) ([]chainjson.GetPeerInfoResult, error) {
+	mc.mtx.Lock()
+	defer mc.mtx.Unlock()
+
+	if mc.getPeerInfoHook != nil {
+		return mc.getPeerInfoHook(ctx)
+	}
+
+	return []chainjson.GetPeerInfoResult{}, nil
 }
 
 // newTestServer returns a Server instance that is forced into the connected
