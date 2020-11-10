@@ -96,6 +96,10 @@ func (s *Server) NetworkStatus(ctx context.Context, req *rtypes.NetworkRequest) 
 		}
 	}
 
+	s.mtx.Lock()
+	syncStatus := s.syncStatus
+	s.mtx.Unlock()
+
 	return &rtypes.NetworkStatusResponse{
 		CurrentBlockIdentifier: &rtypes.BlockIdentifier{
 			Hash:  hash.String(),
@@ -105,6 +109,7 @@ func (s *Server) NetworkStatus(ctx context.Context, req *rtypes.NetworkRequest) 
 		GenesisBlockIdentifier: &rtypes.BlockIdentifier{
 			Hash: s.chainParams.GenesisHash.String(),
 		},
-		Peers: rpeers,
+		Peers:      rpeers,
+		SyncStatus: &syncStatus,
 	}, nil
 }

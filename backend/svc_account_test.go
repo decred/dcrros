@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"decred.org/dcrros/backend/backenddb"
+	"decred.org/dcrros/backend/internal/memdb"
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
@@ -463,4 +464,50 @@ func testReorgDuringPreprocess(t *testing.T, db backenddb.DB) {
 // preprocessing of accounts is correctly handled.
 func TestReorgDuringPreprocess(t *testing.T) {
 	testDbInstances(t, true, testReorgDuringPreprocess)
+}
+
+// TestSyncStatusDuringPreprocess ensures the sync status is stored correctly
+// during preprocess of the chain.
+func TestSyncStatusDuringPreprocess(t *testing.T) {
+	params := chaincfg.RegNetParams()
+	c := newMockChain(t, params)
+	c.extendTip()
+	c.extendTip()
+	c.extendTip()
+
+	// Initialize the server and process the blockchain.
+	db, err := memdb.NewMemDB()
+	require.NoError(t, err)
+	cfg := &ServerConfig{
+		ChainParams: params,
+		DBType:      dbTypePreconfigured,
+		c:           c,
+		db:          db,
+	}
+	svr := newTestServer(t, cfg)
+
+	// Preprocess.
+	err = svr.preProcessAccounts(testCtx(t))
+	require.NoError(t, err)
+
+	svr.mtx.Lock()
+	gotSS := svr.syncStatus
+	svr.mtx.Unlock()
+
+	// During preprocessing, syncStatus should have changed to
+	// "processing_accounts" and the current and target indices should have
+	// been updated.
+	blockHeight := c.tipHeight
+	if gotSS.Stage == nil || *gotSS.Stage != syncStatusStageProcessingAccounts {
+		t.Fatalf("unexpected syncStatus.Stage. want=%v got=%v",
+			syncStatusStageProcessingAccounts, gotSS.Stage)
+	}
+	if gotSS.CurrentIndex != blockHeight {
+		t.Fatalf("unexpected syncStatus.CurrentIndex. want=%d got=%d",
+			blockHeight, gotSS.CurrentIndex)
+	}
+	if gotSS.TargetIndex == nil || *gotSS.TargetIndex != blockHeight {
+		t.Fatalf("unexpected syncStatus.TargetIndex. want=%d got=%v",
+			blockHeight, gotSS.TargetIndex)
+	}
 }

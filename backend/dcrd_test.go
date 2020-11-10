@@ -313,6 +313,23 @@ func TestWaitsForBlockchainSync(t *testing.T) {
 			t.Fatalf("unexpected sync result. want=%v got=%v",
 				tc.wantSynced, gotSynced)
 		}
+
+		// Assert the sync status is the expected one.
+		svr.mtx.Lock()
+		gotSS := svr.syncStatus
+		svr.mtx.Unlock()
+		if gotSS.Stage == nil || *gotSS.Stage != syncStatusStageBlockchainSync {
+			t.Fatalf("unexpected syncStatus.Stage. want=%v got=%v",
+				syncStatusStageBlockchainSync, gotSS.Stage)
+		}
+		if gotSS.CurrentIndex != tc.resp.Blocks {
+			t.Fatalf("unexpected syncStatus.CurrentIndex. want=%d got=%d",
+				tc.resp.Blocks, gotSS.CurrentIndex)
+		}
+		if gotSS.TargetIndex == nil || *gotSS.TargetIndex != tc.resp.SyncHeight {
+			t.Fatalf("unexpected syncStatus.TargetIndex. want=%d got=%v",
+				tc.resp.SyncHeight, gotSS.TargetIndex)
+		}
 	}
 
 	for _, tc := range testCases {

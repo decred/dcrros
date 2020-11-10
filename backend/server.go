@@ -124,6 +124,7 @@ type Server struct {
 	blockNtfns     []*blockNtfn
 	blockNtfnsChan chan struct{}
 	ctx            context.Context
+	syncStatus     rtypes.SyncStatus
 }
 
 // NewServer creates a new server instance.
@@ -355,6 +356,11 @@ func (s *Server) Run(ctx context.Context) error {
 	if err := s.preProcessAccounts(ctx); err != nil {
 		return err
 	}
+
+	// All preprocessing is done, so clear the syncStatus var.
+	s.mtx.Lock()
+	s.syncStatus = rtypes.SyncStatus{}
+	s.mtx.Unlock()
 
 	// Now that we've processed the accounts, we can register for block
 	// notifications.

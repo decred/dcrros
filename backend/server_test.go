@@ -14,6 +14,7 @@ import (
 
 	"decred.org/dcrros/backend/backenddb"
 	"decred.org/dcrros/backend/internal/memdb"
+	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/wire"
 	"github.com/stretchr/testify/require"
@@ -243,6 +244,16 @@ func TestRunsAllDBTypes(t *testing.T) {
 
 			// Wait for run to stabilize.
 			time.Sleep(200 * time.Millisecond)
+
+			// The server's syncStatus should be empty.
+			svr.mtx.Lock()
+			gotSS := svr.syncStatus
+			svr.mtx.Unlock()
+			var emptySyncStatus rtypes.SyncStatus
+			if gotSS != emptySyncStatus {
+				t.Fatalf("unexpected sync status. want=%v, got=%v",
+					rtypes.SyncStatus{}, gotSS)
+			}
 
 			// Cancel the Run() call.
 			cancel()

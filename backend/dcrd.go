@@ -34,6 +34,9 @@ const (
 var (
 	errDcrdUnconnected = errors.New("dcrd instance not connected")
 	errDcrdUnsuitable  = errors.New("dcrd instance is unsuitable for dcrros operation")
+
+	syncStatusStageBlockchainSync     = "blockchain_sync"
+	syncStatusStageProcessingAccounts = "processing_accounts"
 )
 
 // chain specifies the functions needed by a backing chain implementation (an
@@ -168,6 +171,13 @@ func (s *Server) waitForBlockchainSync(ctx context.Context) error {
 
 			continue
 		}
+
+		// Update the current sync status.
+		s.mtx.Lock()
+		s.syncStatus.Stage = &syncStatusStageBlockchainSync
+		s.syncStatus.CurrentIndex = info.Blocks
+		s.syncStatus.TargetIndex = &info.SyncHeight
+		s.mtx.Unlock()
 
 		syncComplete := info.SyncHeight > 0 &&
 			!info.InitialBlockDownload &&

@@ -192,6 +192,18 @@ func (s *Server) preProcessAccounts(ctx context.Context) error {
 		}
 	}
 
+	// Update the current sync status.
+	chainInfo, err := s.c.GetBlockChainInfo(ctx)
+	if err != nil {
+		return err
+	}
+	targetIndex := chainInfo.Blocks
+	s.mtx.Lock()
+	s.syncStatus.Stage = &syncStatusStageProcessingAccounts
+	s.syncStatus.CurrentIndex = startHeight
+	s.syncStatus.TargetIndex = &targetIndex
+	s.mtx.Unlock()
+
 	// We'll start processing at the next block height.
 	startHeight++
 
@@ -211,6 +223,11 @@ func (s *Server) preProcessAccounts(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+
+		// Update the current sync status.
+		s.mtx.Lock()
+		s.syncStatus.CurrentIndex = int64(b.Header.Height)
+		s.mtx.Unlock()
 
 		lastHeight = int64(b.Header.Height)
 		return err
