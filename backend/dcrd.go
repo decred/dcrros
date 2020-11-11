@@ -140,6 +140,15 @@ func isErrRPCOutOfRange(err error) bool {
 	return false
 }
 
+// isErrNoTxInfo returns true if the given error is an RPCError with a
+// ErrRPCNoTxInfo code.
+func isErrNoTxInfo(err error) bool {
+	if rpcerr, ok := err.(*dcrjson.RPCError); ok && rpcerr.Code == dcrjson.ErrRPCNoTxInfo {
+		return true
+	}
+	return false
+}
+
 // waitForBlockchainSync blocks until the underlying dcrd node is synced to the
 // best known chain.
 func (s *Server) waitForBlockchainSync(ctx context.Context) error {

@@ -6,7 +6,6 @@ package backend
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"decred.org/dcrros/types"
@@ -49,6 +48,9 @@ func (s *Server) inputsFetcher(ctx context.Context, utxoSet map[wire.OutPoint]*t
 		txh := txh
 		g.Go(func() error {
 			tx, err := s.getRawTx(gctx, &txh)
+			if isErrNoTxInfo(err) {
+				return types.ErrPrevOutTxNotFound.Msgf("tx %s", txh)
+			}
 			if err != nil {
 				return err
 			}
@@ -72,7 +74,8 @@ func (s *Server) inputsFetcher(ctx context.Context, utxoSet map[wire.OutPoint]*t
 			continue
 		}
 		if len(tx.TxOut) <= int(in.Index) {
-			return nil, fmt.Errorf("non-existent output index %s", in.String())
+			return nil, types.ErrPrevOutIndexNotFound.Msgf(
+				"tx %s index %d", in.Hash, in.Index)
 		}
 		out := tx.TxOut[in.Index]
 		res[*in] = &types.PrevInput{

@@ -798,7 +798,7 @@ func TestConstructionParseEndpoint(t *testing.T) {
 		ins:     []*wire.TxIn{debitNoPrevTxIn},
 		outs:    []*wire.TxOut{creditOut},
 		signed:  false,
-		wantErr: types.ErrUnknown,
+		wantErr: types.ErrPrevOutTxNotFound,
 	}, {
 		name: "invalid hex",
 		forceReq: &rtypes.ConstructionParseRequest{
@@ -850,10 +850,9 @@ func TestConstructionParseEndpoint(t *testing.T) {
 			}
 		}
 		res, rerr := svr.ConstructionParse(context.Background(), req)
-		gotErr := rerr != nil
 		if !types.RosettaErrorIs(rerr, tc.wantErr) {
 			t.Fatalf("unexpected error. want=%v got=%v",
-				tc.wantErr, gotErr)
+				tc.wantErr, rerr)
 		}
 
 		if tc.wantErr != nil {

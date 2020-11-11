@@ -59,6 +59,8 @@ const (
 	ErrInvalidSig
 	ErrInvalidPubKey
 	ErrChainUnavailable
+	ErrPrevOutTxNotFound
+	ErrPrevOutIndexNotFound
 
 	// This MUST be the last member.
 	nbErrorCodes
@@ -98,6 +100,8 @@ var errorCodeMsgs = map[ErrorCode]string{
 	ErrInvalidSig:                "invalid signature",
 	ErrInvalidPubKey:             "invalid public key",
 	ErrChainUnavailable:          "chain unavailable",
+	ErrPrevOutTxNotFound:         "previous output tx not found",
+	ErrPrevOutIndexNotFound:      "previous output tx index not found",
 }
 
 // Error returns the default error message for the given error code.

@@ -134,6 +134,7 @@ type mockChain struct {
 	getBlockHook           func(ctx context.Context, blockHash *chainhash.Hash) (*wire.MsgBlock, error)
 	getBlockHashHook       func(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
 	getBlockChainInfoHook  func(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error)
+	getRawTransactionHook  func(ctx context.Context, txHash *chainhash.Hash) (*dcrutil.Tx, error)
 	getInfoHook            func(ctx context.Context) (*chainjson.InfoChainResult, error)
 	versionHook            func(ctx context.Context) (map[string]chainjson.VersionResult, error)
 	getRawMempoolHook      func(ctx context.Context, txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error)
@@ -183,7 +184,9 @@ func (mc *mockChain) addCoinbase(b *wire.MsgBlock) {
 // addSudoTx adds a pseudo-tx directly to the tx index, allowing this tx to be
 // used as source for another tx. The given value and pks are used in the
 // single tx out.
-func (mc *mockChain) addSudoTx(value int64, pkScript []byte) chainhash.Hash {
+func (mc *mockChain) addSudoTx(value int64, pkScript []byte,
+	txManglers ...func(tx *wire.MsgTx)) chainhash.Hash {
+
 	// Add a random nonce to ensure each tx is unique.
 	var prevHash [32]byte
 	mc.noncer.Read(prevHash[:])
@@ -191,6 +194,11 @@ func (mc *mockChain) addSudoTx(value int64, pkScript []byte) chainhash.Hash {
 	tx := wire.NewMsgTx()
 	tx.AddTxIn(wire.NewTxIn(&wire.OutPoint{Hash: prevHash}, 0, nil))
 	tx.AddTxOut(wire.NewTxOut(value, pkScript))
+
+	for _, txm := range txManglers {
+		txm(tx)
+	}
+
 	txh := tx.TxHash()
 	mc.txByHash[txh] = tx
 	return txh
@@ -341,10 +349,7 @@ func (mc *mockChain) GetBlock(ctx context.Context, blockHash *chainhash.Hash) (*
 	return mc.getBlock(ctx, blockHash)
 }
 
-func (mc *mockChain) GetRawTransaction(ctx context.Context, txHash *chainhash.Hash) (*dcrutil.Tx, error) {
-	mc.mtx.Lock()
-	defer mc.mtx.Unlock()
-
+func (mc *mockChain) getRawTransaction(ctx context.Context, txHash *chainhash.Hash) (*dcrutil.Tx, error) {
 	tx, ok := mc.txByHash[*txHash]
 	if !ok {
 		return nil, &dcrjson.RPCError{
@@ -353,6 +358,17 @@ func (mc *mockChain) GetRawTransaction(ctx context.Context, txHash *chainhash.Ha
 		}
 	}
 	return dcrutil.NewTx(tx), nil
+}
+
+func (mc *mockChain) GetRawTransaction(ctx context.Context, txHash *chainhash.Hash) (*dcrutil.Tx, error) {
+	mc.mtx.Lock()
+	defer mc.mtx.Unlock()
+
+	if mc.getRawTransactionHook != nil {
+		return mc.getRawTransactionHook(ctx, txHash)
+	}
+
+	return mc.getRawTransaction(ctx, txHash)
 }
 
 func (mc *mockChain) GetBestBlockHash(ctx context.Context) (*chainhash.Hash, error) {

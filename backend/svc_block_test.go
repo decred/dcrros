@@ -6,6 +6,7 @@ package backend
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"decred.org/dcrros/backend/backenddb"
@@ -13,6 +14,7 @@ import (
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
+	"github.com/decred/dcrd/dcrutil/v3"
 	"github.com/decred/dcrd/wire"
 	"github.com/stretchr/testify/require"
 )
@@ -187,4 +189,129 @@ func testBlockEndpoint(t *testing.T, db backenddb.DB) {
 // that's done by the types package and unit tested there.
 func TestBlockEndpoint(t *testing.T) {
 	testDbInstances(t, true, testBlockEndpoint)
+}
+
+// TestInputsFetcher verifies the inputsFetcher function behaves as expected.
+func TestInputsFetcher(t *testing.T) {
+	t.Parallel()
+
+	params := chaincfg.RegNetParams()
+	c := newMockChain(t, params)
+
+	// Add a tx to the chain so we can verify it exists. We'll add an
+	// additional tx out to it in order to do some tests.
+	addTxOut := func(tx *wire.MsgTx) {
+		tx.AddTxOut(wire.NewTxOut(10, []byte{}))
+	}
+	txHash := c.addSudoTx(10, []byte{}, addTxOut)
+	correctOutPoint0 := wire.OutPoint{Hash: txHash, Index: 0}
+	correctOutPoint1 := wire.OutPoint{Hash: txHash, Index: 1}
+	txHash2 := c.addSudoTx(10, []byte{})
+	correctOutPointTx2 := wire.OutPoint{Hash: txHash2, Index: 0}
+	wrongIndexOutPoint := wire.OutPoint{Hash: txHash, Index: 100}
+	wrongHashOutPoint := wire.OutPoint{Hash: chainhash.Hash{0: 0x01}, Index: 0}
+
+	// Initialize the server.
+	cfg := &ServerConfig{
+		ChainParams: params,
+		DBType:      dbTypePreconfigured,
+		c:           c,
+	}
+	svr := newTestServer(t, cfg)
+
+	type testCase struct {
+		name         string
+		utxoSet      map[wire.OutPoint]*types.PrevInput
+		reqOutPoints []*wire.OutPoint
+		forceErr     error
+		wantErr      error
+	}
+
+	dummyErr := errors.New("boo")
+	testCases := []testCase{{
+		name:         "prevout exists in chain",
+		reqOutPoints: []*wire.OutPoint{&correctOutPoint0},
+	}, {
+		name: "prevout exists in utxo set",
+		utxoSet: map[wire.OutPoint]*types.PrevInput{
+			correctOutPoint0: nil,
+		},
+		reqOutPoints: []*wire.OutPoint{&correctOutPoint0},
+	}, {
+		name:         "same prevout requested twice",
+		reqOutPoints: []*wire.OutPoint{&correctOutPoint0, &correctOutPoint0},
+	}, {
+		name:         "different prevouts from same tx in chain",
+		reqOutPoints: []*wire.OutPoint{&correctOutPoint0, &correctOutPoint1},
+	}, {
+		name:         "different prevouts from same tx in utxo set",
+		reqOutPoints: []*wire.OutPoint{&correctOutPoint0, &correctOutPoint1},
+		utxoSet: map[wire.OutPoint]*types.PrevInput{
+			correctOutPoint0: nil,
+			correctOutPoint1: nil,
+		},
+	}, {
+		name:         "different prevouts from same tx partially in utxo set",
+		reqOutPoints: []*wire.OutPoint{&correctOutPoint0, &correctOutPoint1},
+		utxoSet: map[wire.OutPoint]*types.PrevInput{
+			correctOutPoint0: nil,
+		},
+	}, {
+		name: "different prevouts partially in utxo set",
+		reqOutPoints: []*wire.OutPoint{&correctOutPoint0,
+			&correctOutPoint1, &correctOutPointTx2},
+		utxoSet: map[wire.OutPoint]*types.PrevInput{
+			correctOutPointTx2: nil,
+		},
+	}, {
+		name:         "requested tx with wrong hash",
+		reqOutPoints: []*wire.OutPoint{&correctOutPoint0, &wrongHashOutPoint},
+		wantErr:      types.ErrPrevOutTxNotFound,
+	}, {
+		name:         "requested tx with wrong index",
+		reqOutPoints: []*wire.OutPoint{&correctOutPoint0, &wrongIndexOutPoint},
+		wantErr:      types.ErrPrevOutIndexNotFound,
+	}, {
+		name:         "force error on getRawTransaction",
+		reqOutPoints: []*wire.OutPoint{&correctOutPoint0},
+		forceErr:     dummyErr,
+		wantErr:      dummyErr,
+	}}
+
+	test := func(t *testing.T, tc *testCase) {
+		// Hook into the getRawTx function in case we need to return a
+		// specific error.
+		c.getRawTransactionHook = func(ctx context.Context, txHash *chainhash.Hash) (*dcrutil.Tx, error) {
+			if tc.forceErr != nil {
+				return nil, tc.forceErr
+			}
+			return c.getRawTransaction(ctx, txHash)
+		}
+
+		res, err := svr.inputsFetcher(testCtx(t), tc.utxoSet,
+			tc.reqOutPoints...)
+		if !errors.Is(err, tc.wantErr) {
+			t.Fatalf("unexpected error. want=%v, got=%v",
+				tc.wantErr, err)
+		}
+		if tc.wantErr != nil {
+			return
+		}
+
+		// Ensure we got all requested outpoints.
+		gotPrevOuts := make(map[wire.OutPoint]struct{})
+		for outp := range res {
+			gotPrevOuts[outp] = struct{}{}
+		}
+		for _, wantOutp := range tc.reqOutPoints {
+			if _, ok := gotPrevOuts[*wantOutp]; !ok {
+				t.Fatalf("outpoint %s not returned", wantOutp)
+			}
+		}
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) { test(t, &tc) })
+	}
 }
