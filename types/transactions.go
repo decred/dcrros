@@ -57,6 +57,21 @@ func decodeOutPoint(s string) (wire.OutPoint, error) {
 	return out, nil
 }
 
+// coinChangeToOutPoint decodes the given coin change into a wire OutPoint.
+func coinChangeToOutPoint(cc *rtypes.CoinChange) (wire.OutPoint, error) {
+	if cc == nil {
+		return wire.OutPoint{}, fmt.Errorf("coin_change must not be nil")
+	}
+	if cc.CoinIdentifier == nil {
+		return wire.OutPoint{}, fmt.Errorf("coin_change.coin_identifier must not be nil")
+	}
+	outp, err := decodeOutPoint(cc.CoinIdentifier.Identifier)
+	if err != nil {
+		return outp, fmt.Errorf("unable to decode outpoint: %v", err)
+	}
+	return outp, nil
+}
+
 func metadataInt8(m map[string]interface{}, k string, i *int8) error {
 	v, ok := m[k]
 	if !ok {
@@ -164,21 +179,15 @@ func rosettaOpToTx(op *rtypes.Operation, tx *wire.MsgTx, chainParams *chaincfg.P
 		if opAmt < 0 {
 			opAmt = -opAmt
 		}
-		var prevOut wire.OutPoint
 
 		// Debits require an originating coins_spent CoinChange so we can fill
 		// PrevousOutPoint.
-		if op.CoinChange == nil {
-			return fmt.Errorf("debit operation needs to have a filled coin_change")
-		}
-		if op.CoinChange.CoinIdentifier == nil {
-			return fmt.Errorf("debit operation needs to have a filled coin_change.coin_identifier")
+		prevOut, err := coinChangeToOutPoint(op.CoinChange)
+		if err != nil {
+			return fmt.Errorf("invalid coin_change in debit op: %v", err)
 		}
 		if op.CoinChange.CoinAction != rtypes.CoinSpent {
 			return fmt.Errorf("debit operation needs a coin_spent coin_action")
-		}
-		if prevOut, err = decodeOutPoint(op.CoinChange.CoinIdentifier.Identifier); err != nil {
-			return fmt.Errorf("unable to decode outpoint: %v", err)
 		}
 
 		// Ignore if prev_tree is not found (defaults to regular tree).
@@ -253,6 +262,60 @@ func RosettaOpsToTx(txMeta map[string]interface{}, ops []*rtypes.Operation, chai
 	return tx, nil
 }
 
+// prevInputFromDebitOp re-calculates the PrevInput structure from a given
+// debit operation.
+func prevInputFromDebitOp(op *rtypes.Operation, chainParams *chaincfg.Params) (
+	*PrevInput, dcrutil.Address, error) {
+
+	if op.Type != string(OpTypeDebit) {
+		return nil, nil, fmt.Errorf("op must be a debit to extract prevInput")
+	}
+	if op.Account == nil {
+		return nil, nil, fmt.Errorf("account cannot be nil")
+	}
+	if op.Account.Metadata == nil {
+		return nil, nil, fmt.Errorf("account.metadata cannot be nil")
+	}
+
+	// Figure out the original version and PkScript given the address.
+	var version uint16
+	if err := metadataUint16(op.Account.Metadata, "script_version", &version); err != nil {
+		return nil, nil, fmt.Errorf("unable to decode script_version: %v", err)
+	}
+
+	// Addresses with a version other than zero or encoded in raw format
+	// ("0x" prefix) are not standardized, so we don't know how to generate
+	// a PkScript for them.
+	if version != 0 || strings.HasPrefix(op.Account.Address, "0x") {
+		return nil, nil, nil
+	}
+
+	addr, err := dcrutil.DecodeAddress(op.Account.Address, chainParams)
+	if err != nil {
+		return nil, nil, fmt.Errorf("unable to decode address: %v", err)
+	}
+
+	// Generate the corresponding pkscript and signature hash.
+	pkScript, err := txscript.PayToAddrScript(addr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("unable to generate pkscript: %v", err)
+	}
+
+	amount, err := RosettaToDcrAmount(op.Amount)
+	if err != nil {
+		return nil, nil, err
+	}
+	if amount < 0 {
+		amount = -amount
+	}
+
+	return &PrevInput{
+		PkScript: pkScript,
+		Version:  version,
+		Amount:   amount,
+	}, addr, nil
+}
+
 func extractInputSignPayload(op *rtypes.Operation, tx *wire.MsgTx, idx int,
 	chainParams *chaincfg.Params) (*rtypes.SigningPayload, error) {
 
@@ -260,20 +323,9 @@ func extractInputSignPayload(op *rtypes.Operation, tx *wire.MsgTx, idx int,
 		return nil, fmt.Errorf("trying to sign inexistent input %d", idx)
 	}
 
-	if op.Account == nil {
-		return nil, fmt.Errorf("account cannot be nil")
-	}
-	if op.Account.Metadata == nil {
-		return nil, fmt.Errorf("account.metadata cannot be nil")
-	}
-
-	// TODO: Use the prefix hash (tx.TxHash()) to speed up calculations?
-
-	// Figure out the original version and PkScript given the
-	// address.
-	var version uint16
-	if err := metadataUint16(op.Account.Metadata, "script_version", &version); err != nil {
-		return nil, fmt.Errorf("unable to decode script_version: %v", err)
+	prevInput, addr, err := prevInputFromDebitOp(op, chainParams)
+	if err != nil {
+		return nil, err
 	}
 
 	// Addresses with a version other than zero or encoded in raw format
@@ -281,17 +333,13 @@ func extractInputSignPayload(op *rtypes.Operation, tx *wire.MsgTx, idx int,
 	// them. They might be signable by some other software though (e.g.
 	// some other PSDT signer) so we don't error out on those cases but
 	// simply signal that those inputs don't produce a signing payload.
-	if version != 0 || strings.HasPrefix(op.Account.Address, "0x") {
+	if addr == nil {
 		return nil, nil
 	}
 
 	// Determine the signature type based on the type of address. Note we
 	// only support P2PKH for ecdsa (*not* P2PK).
 	var sigType rtypes.SignatureType
-	addr, err := dcrutil.DecodeAddress(op.Account.Address, chainParams)
-	if err != nil {
-		return nil, fmt.Errorf("unable to decode address: %v", err)
-	}
 	switch addr.(type) {
 	case *dcrutil.AddressPubKeyHash:
 		sigType = rtypes.Ecdsa
@@ -301,13 +349,8 @@ func extractInputSignPayload(op *rtypes.Operation, tx *wire.MsgTx, idx int,
 		return nil, nil
 	}
 
-	// Generate the corresponding pkscript and signature hash.
-	pkScript, err := txscript.PayToAddrScript(addr)
-	if err != nil {
-		return nil, fmt.Errorf("unable to generate pkscript: %v", err)
-	}
-
-	sigHash, err := txscript.CalcSignatureHash(pkScript, sigHashType, tx, idx, nil)
+	sigHash, err := txscript.CalcSignatureHash(prevInput.PkScript,
+		sigHashType, tx, idx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error during calcSigHash: %v", err)
 	}
@@ -494,4 +537,47 @@ func CombineTxSigs(sigs []*rtypes.Signature, tx *wire.MsgTx,
 	}
 
 	return nil
+}
+
+// ExtractPrevInputsFromOps iterates over all debits of the given list of
+// operations and generates a map OutPoint => PrevInput that can be used to
+// later identify the previous outputs of the debits.
+func ExtractPrevInputsFromOps(ops []*rtypes.Operation, chainParams *chaincfg.Params) (
+	map[wire.OutPoint]*PrevInput, error) {
+
+	res := make(map[wire.OutPoint]*PrevInput)
+
+	for i, op := range ops {
+		if op.Type != string(OpTypeDebit) {
+			continue
+		}
+
+		prevInput, _, err := prevInputFromDebitOp(op, chainParams)
+		if err != nil {
+			return nil, fmt.Errorf("unable to extract prevInput "+
+				"from debit %d: %v", i, err)
+		}
+
+		// Ignore unknown script versions and addresses.
+		if prevInput == nil {
+			continue
+		}
+
+		// Debits require an originating coins_spent CoinChange so we
+		// can fill PreviousOutPoint.
+		outPoint, err := coinChangeToOutPoint(op.CoinChange)
+		if err != nil {
+			return nil, fmt.Errorf("debit op %d has invalid "+
+				"coin_change: %v", i, err)
+		}
+
+		if op.CoinChange.CoinAction != rtypes.CoinSpent {
+			return nil, fmt.Errorf("debit op %d needs a coin_spent "+
+				"coin_action", i)
+		}
+
+		res[outPoint] = prevInput
+	}
+
+	return res, nil
 }

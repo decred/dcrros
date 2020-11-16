@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
+	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 )
 
@@ -21,6 +22,15 @@ func mustHex(s string) []byte {
 		panic(err)
 	}
 	return b
+}
+
+// mustHash decodes the given string as a chainhash.Hash value or panics.
+func mustHash(s string) chainhash.Hash {
+	var h chainhash.Hash
+	if err := chainhash.Decode(&h, s); err != nil {
+		panic(err)
+	}
+	return h
 }
 
 // TestDcrPkScriptToRosetta tests that converting pkscripts to Rosetta

@@ -594,3 +594,183 @@ func TestCombineSigs(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) { test(t, &tc) })
 	}
 }
+
+// TestExtractPrevInputsFromOps ensures the ExtractPRevInputsFromOps behaves as
+// expected.
+func TestExtractPrevInputsFromOps(t *testing.T) {
+	chainParams := chaincfg.RegNetParams()
+
+	type testCase struct {
+		name    string
+		ops     []*rtypes.Operation
+		target  map[wire.OutPoint]*PrevInput
+		wantErr bool
+	}
+
+	hashHex1 := "574dfd8c1b169acfdfc245d4402346ea4d1aea8806e722e0be5796effa75767c"
+	hashHash1 := mustHash(hashHex1)
+	hashHex2 := "d1aea8d4be567c402346ea45796effa757806e574dfd8c1b169acfdfc24722e0"
+	hashHash2 := mustHash(hashHex2)
+
+	testCases := []testCase{{
+		name:   "no ops",
+		ops:    []*rtypes.Operation{},
+		target: map[wire.OutPoint]*PrevInput{},
+	}, {
+		name: "no debits",
+		ops: []*rtypes.Operation{{
+			Type: "credit",
+		}},
+		target: map[wire.OutPoint]*PrevInput{},
+	}, {
+		name: "one debit",
+		ops: []*rtypes.Operation{{
+			Type: "debit",
+			Account: &rtypes.AccountIdentifier{
+				Address: "RsDTyN2KTSyu5gJzBFN5ra1wbHECUBsXWiA",
+				Metadata: map[string]interface{}{
+					"script_version": uint16(0),
+				},
+			},
+			Amount: DcrAmountToRosetta(10),
+			CoinChange: &rtypes.CoinChange{
+				CoinIdentifier: &rtypes.CoinIdentifier{
+					Identifier: hashHex1 + ":1",
+				},
+				CoinAction: "coin_spent",
+			},
+		}},
+		target: map[wire.OutPoint]*PrevInput{
+			{Hash: hashHash1, Index: 1}: {
+				PkScript: mustHex("76a91438336cea45bafa04c6c1dab1e588c8ce7de3a71b88ac"),
+				Amount:   10,
+				Version:  0,
+			},
+		},
+	}, {
+		name: "two debits",
+		ops: []*rtypes.Operation{{
+			Type: "debit",
+			Account: &rtypes.AccountIdentifier{
+				Address: "RsDTyN2KTSyu5gJzBFN5ra1wbHECUBsXWiA",
+				Metadata: map[string]interface{}{
+					"script_version": uint16(0),
+				},
+			},
+			Amount: DcrAmountToRosetta(10),
+			CoinChange: &rtypes.CoinChange{
+				CoinIdentifier: &rtypes.CoinIdentifier{
+					Identifier: hashHex1 + ":1",
+				},
+				CoinAction: "coin_spent",
+			},
+		}, {
+			Type: "debit",
+			Account: &rtypes.AccountIdentifier{
+				Address: "RsDTyN2KTSyu5gJzBFN5ra1wbHECUBsXWiA",
+				Metadata: map[string]interface{}{
+					"script_version": uint16(0),
+				},
+			},
+			Amount: DcrAmountToRosetta(20),
+			CoinChange: &rtypes.CoinChange{
+				CoinIdentifier: &rtypes.CoinIdentifier{
+					Identifier: hashHex2 + ":10",
+				},
+				CoinAction: "coin_spent",
+			},
+		}},
+		target: map[wire.OutPoint]*PrevInput{
+			{Hash: hashHash1, Index: 1}: {
+				PkScript: mustHex("76a91438336cea45bafa04c6c1dab1e588c8ce7de3a71b88ac"),
+				Amount:   10,
+				Version:  0,
+			},
+			{Hash: hashHash2, Index: 10}: {
+				PkScript: mustHex("76a91438336cea45bafa04c6c1dab1e588c8ce7de3a71b88ac"),
+				Amount:   20,
+				Version:  0,
+			},
+		},
+	}, {
+		name: "no account version",
+		ops: []*rtypes.Operation{{
+			Type: "debit",
+			Account: &rtypes.AccountIdentifier{
+				Address:  "RsDTyN2KTSyu5gJzBFN5ra1wbHECUBsXWiA",
+				Metadata: map[string]interface{}{},
+			},
+			Amount: DcrAmountToRosetta(10),
+			CoinChange: &rtypes.CoinChange{
+				CoinIdentifier: &rtypes.CoinIdentifier{
+					Identifier: hashHex1 + ":1",
+				},
+				CoinAction: "coin_spent",
+			},
+		}},
+		wantErr: true,
+	}, {
+		name: "no account",
+		ops: []*rtypes.Operation{{
+			Type:   "debit",
+			Amount: DcrAmountToRosetta(10),
+			CoinChange: &rtypes.CoinChange{
+				CoinIdentifier: &rtypes.CoinIdentifier{
+					Identifier: hashHex1 + ":1",
+				},
+				CoinAction: "coin_spent",
+			},
+		}},
+		wantErr: true,
+	}, {
+		name: "no coin change identifier",
+		ops: []*rtypes.Operation{{
+			Type: "debit",
+			Account: &rtypes.AccountIdentifier{
+				Address: "RsDTyN2KTSyu5gJzBFN5ra1wbHECUBsXWiA",
+				Metadata: map[string]interface{}{
+					"script_version": uint16(0),
+				},
+			},
+			Amount: DcrAmountToRosetta(10),
+			CoinChange: &rtypes.CoinChange{
+				CoinAction: "coin_spent",
+			},
+		}},
+		wantErr: true,
+	}, {
+		name: "no coin change",
+		ops: []*rtypes.Operation{{
+			Type: "debit",
+			Account: &rtypes.AccountIdentifier{
+				Address: "RsDTyN2KTSyu5gJzBFN5ra1wbHECUBsXWiA",
+				Metadata: map[string]interface{}{
+					"script_version": uint16(0),
+				},
+			},
+			Amount: DcrAmountToRosetta(10),
+		}},
+		wantErr: true,
+	}}
+
+	test := func(t *testing.T, tc *testCase) {
+		gotMap, err := ExtractPrevInputsFromOps(tc.ops, chainParams)
+		gotErr := err != nil
+		if gotErr != tc.wantErr {
+			t.Fatalf("unexpected error. want=%v, got=%v, err=%v",
+				tc.wantErr, gotErr, err)
+		}
+
+		if tc.wantErr {
+			return
+		}
+
+		require.Equal(t, tc.target, gotMap)
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) { test(t, &tc) })
+	}
+
+}
