@@ -22,6 +22,7 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/dcrd/dcrjson/v3"
+	"github.com/decred/dcrd/dcrutil/v3"
 	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
 	"github.com/stretchr/testify/require"
@@ -1519,4 +1520,201 @@ func TestConstructionSubmitEndpoint(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) { test(t, &tc) })
 	}
+}
+
+// TestConstructionInteraction tests a full interaction of the Construction
+// APIs in order to build and submit a transaction.
+func TestConstructionInteraction(t *testing.T) {
+	params := chaincfg.RegNetParams()
+
+	// chainOnline simulates a chain that is connected to the network.
+	// chainOffline is a chain that never leaves genesis.
+	chainOnline := newMockChain(t, params)
+	chainOffline := newMockChain(t, params)
+
+	// Shorter function names to improve readability.
+	coinAmt := int64(1e8)
+	privKeyBytes := mustHex("c387ce35ba8e5d6a566f76c2cf5b055b3a01fe9fd5e5856e93aca8f6d3405696")
+	privKeySecp256k1 := secp256k1.PrivKeyFromBytes(privKeyBytes)
+	pubKeySecp256k1 := privKeySecp256k1.PubKey()
+	pubKeySecp256k1Hash := dcrutil.Hash160(pubKeySecp256k1.SerializeCompressed())
+	addrEcdsaSecp256k1, err := dcrutil.NewAddressPubKeyHash(pubKeySecp256k1Hash,
+		params, dcrec.STEcdsaSecp256k1)
+	require.NoError(t, err)
+	scriptFlags := txscript.ScriptDiscourageUpgradableNops |
+		txscript.ScriptVerifyCheckLockTimeVerify |
+		txscript.ScriptVerifyCleanStack |
+		txscript.ScriptVerifySigPushOnly |
+		txscript.ScriptVerifySHA256 |
+		txscript.ScriptVerifyTreasury
+
+	// Generate txs in the mock chain that we can spend from and keep track
+	// of outputs that will be spent. This tx only exists in the chain that
+	// is online to receive blocks.
+	pksEcdsaSecp256k1, err := txscript.PayToAddrScript(addrEcdsaSecp256k1)
+	require.NoError(t, err)
+	outpointEcdsaSecp256k1 := wire.OutPoint{
+		Hash:  chainOnline.addSudoTx(coinAmt, pksEcdsaSecp256k1), // Tx needs to exist in the chain.
+		Index: 0,
+	}
+	scriptVersion0 := uint16(0)
+	prevOuts := map[wire.OutPoint]wire.TxOut{
+		outpointEcdsaSecp256k1: {
+			Value:    coinAmt,
+			Version:  scriptVersion0,
+			PkScript: pksEcdsaSecp256k1,
+		},
+	}
+
+	// Initialize the servers. One is "online" (i.e. has blocks, connected
+	// to other peers, etc) the other is offline (no blocks, peers, etc).
+	cfgOnline := &ServerConfig{
+		ChainParams: params,
+		DBType:      dbTypePreconfigured,
+		c:           chainOnline,
+	}
+	cfgOffline := &ServerConfig{
+		ChainParams: params,
+		DBType:      dbTypePreconfigured,
+		c:           chainOffline,
+	}
+	svrOnline := newTestServer(t, cfgOnline)
+	svrOffline := newTestServer(t, cfgOffline)
+
+	// Step 1: Derive the account address for the pubkeys that will spend
+	// coins.
+	reqDeriveEcdsaSecp256k1 := &rtypes.ConstructionDeriveRequest{
+		PublicKey: &rtypes.PublicKey{
+			Bytes:     pubKeySecp256k1.SerializeCompressed(),
+			CurveType: rtypes.Secp256k1,
+		},
+		Metadata: map[string]interface{}{
+			"script_version": scriptVersion0,
+			"algo":           "ecdsa",
+		},
+	}
+	resDeriveEcdsaSecp256k1, rerr := svrOffline.ConstructionDerive(testCtx(t), reqDeriveEcdsaSecp256k1)
+	require.Nil(t, rerr)
+
+	// (Client Step): Create the list of ops that will end up in the tx.
+	ops := []*rtypes.Operation{{
+		Type:     "debit",
+		Amount:   types.DcrAmountToRosetta(dcrutil.Amount(coinAmt)),
+		Metadata: map[string]interface{}{},
+		Account:  resDeriveEcdsaSecp256k1.AccountIdentifier,
+		CoinChange: &rtypes.CoinChange{
+			CoinIdentifier: &rtypes.CoinIdentifier{
+				Identifier: outpointEcdsaSecp256k1.String(),
+			},
+			CoinAction: rtypes.CoinSpent,
+		},
+	}, {
+		Type:    "credit",
+		Amount:  types.DcrAmountToRosetta(dcrutil.Amount(coinAmt)),
+		Account: resDeriveEcdsaSecp256k1.AccountIdentifier,
+	}}
+	txMeta := map[string]interface{}{}
+
+	// Step 2: Preprocess the operations in offline dcrros node to fetch
+	// required options.
+	reqPreprocess := &rtypes.ConstructionPreprocessRequest{
+		Operations: ops,
+		Metadata:   txMeta,
+	}
+	resPreprocess, rerr := svrOffline.ConstructionPreprocess(testCtx(t), reqPreprocess)
+	require.Nil(t, rerr)
+
+	// Step 3: Request metadata from online dcrros node.
+	reqMetadata := &rtypes.ConstructionMetadataRequest{
+		Options: resPreprocess.Options,
+	}
+	resMetadata, rerr := svrOnline.ConstructionMetadata(testCtx(t), reqMetadata)
+	require.Nil(t, rerr)
+
+	// (Client Step): Subtract the fee from the first output.
+	fee, err := strconv.ParseInt(resMetadata.SuggestedFee[0].Value, 10, 64)
+	require.NoError(t, err)
+	ops[1].Amount.Value = strconv.FormatInt(coinAmt-fee, 10)
+
+	// Step 4: Generate the payloads that need to be signed.
+	reqPayloads := &rtypes.ConstructionPayloadsRequest{
+		Metadata:   txMeta,
+		Operations: ops,
+	}
+	resPayloads, rerr := svrOffline.ConstructionPayloads(testCtx(t), reqPayloads)
+	require.Nil(t, rerr)
+
+	// Step 5: Parse unsigned tx to confirm correctness.
+	reqParse := &rtypes.ConstructionParseRequest{
+		Transaction: resPayloads.UnsignedTransaction,
+	}
+	resParse, rerr := svrOffline.ConstructionParse(testCtx(t), reqParse)
+	require.Nil(t, rerr)
+	require.Len(t, resParse.Operations, 2)
+
+	// (Client Step): Sign the payloads.
+	//
+	// For ECDSA over secp256k1, generate the compact signature and remove
+	// the recovery code (first byte of the sig).
+	payloadEcdsaSecp256k1 := resPayloads.Payloads[0].Bytes
+	sigEcdsaSecp256k1 := ecdsa.SignCompact(privKeySecp256k1,
+		payloadEcdsaSecp256k1, true)[1:]
+
+	// Step 5: Combine signatures to generate final signed tx.
+	reqCombine := &rtypes.ConstructionCombineRequest{
+		UnsignedTransaction: resPayloads.UnsignedTransaction,
+		Signatures: []*rtypes.Signature{{
+			SigningPayload: resPayloads.Payloads[0],
+			PublicKey:      reqDeriveEcdsaSecp256k1.PublicKey,
+			SignatureType:  rtypes.Ecdsa,
+			Bytes:          sigEcdsaSecp256k1,
+		}},
+	}
+	resCombine, rerr := svrOffline.ConstructionCombine(testCtx(t), reqCombine)
+	require.Nil(t, rerr)
+
+	// Step 6: Parse signed tx to confirm correctness.
+	reqParseSigned := &rtypes.ConstructionParseRequest{
+		Transaction: resCombine.SignedTransaction,
+		Signed:      true,
+	}
+	resParseSigned, rerr := svrOffline.ConstructionParse(testCtx(t), reqParseSigned)
+	require.Nil(t, rerr)
+	require.Len(t, resParseSigned.Operations, 2)
+
+	// Assert the signed tx can be decoded and all input sigscripts are
+	// correct.
+	ctrtx := new(constructionTx)
+	if err := ctrtx.deserialize(resCombine.SignedTransaction); err != nil {
+		t.Fatalf("unable to deserialize signed tx: %v", err)
+	}
+	signedTx := ctrtx.tx
+	for i, in := range signedTx.TxIn {
+		prevOut, ok := prevOuts[in.PreviousOutPoint]
+		require.True(t, ok)
+		vm, err := txscript.NewEngine(prevOut.PkScript, signedTx, i,
+			scriptFlags, prevOut.Version, nil)
+		require.NoError(t, err)
+
+		if err := vm.Execute(); err != nil {
+			t.Fatalf("error executing resulting script %d: %v",
+				i, err)
+		}
+	}
+
+	// Step 7: Get hash of signed transaction.
+	reqHash := &rtypes.ConstructionHashRequest{
+		SignedTransaction: resCombine.SignedTransaction,
+	}
+	resHash, rerr := svrOffline.ConstructionHash(testCtx(t), reqHash)
+	require.Nil(t, rerr)
+	require.Equal(t, signedTx.TxHash().String(), resHash.TransactionIdentifier.Hash)
+
+	// Step 8: Submit the tx to the network.
+	reqSubmit := &rtypes.ConstructionSubmitRequest{
+		SignedTransaction: resCombine.SignedTransaction,
+	}
+	resSubmit, rerr := svrOnline.ConstructionSubmit(testCtx(t), reqSubmit)
+	require.Nil(t, rerr)
+	require.Equal(t, resHash.TransactionIdentifier.Hash, resSubmit.TransactionIdentifier.Hash)
 }
