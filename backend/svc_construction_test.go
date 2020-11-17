@@ -7,7 +7,6 @@ package backend
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -874,12 +873,13 @@ func TestConstructionPayloadsEndpoint(t *testing.T) {
 		}
 		wantTxBytes, err := wantTx.Bytes()
 		require.NoError(t, err)
-		gotTxBytes := mustHex(res.UnsignedTransaction)
-		var gotTx wire.MsgTx
-		if err := gotTx.FromBytes(gotTxBytes); err != nil {
-			t.Logf("tx bytes: %s", res.UnsignedTransaction)
-			t.Fatalf("unable to decode got tx: %v", err)
-		}
+
+		ctrtx := new(constructionTx)
+		err = ctrtx.deserialize(res.UnsignedTransaction)
+		require.NoError(t, err)
+		gotTx := ctrtx.tx
+		gotTxBytes, err := gotTx.Bytes()
+		require.NoError(t, err)
 
 		if !bytes.Equal(wantTxBytes, gotTxBytes) {
 			t.Logf("want tx %s", spew.Sdump(wantTx))
@@ -959,18 +959,16 @@ func TestConstructionParseEndpoint(t *testing.T) {
 	debitSigner := debit1.Account
 	credit, creditOut := c.genCredit(20, addrEcdsa)
 
-	// Debit that references a tx not found either mined or in the mempool.
-	debitNoPrevTxIn := &wire.TxIn{
-		PreviousOutPoint: wire.OutPoint{
-			Hash: chainhash.Hash{0: 0x01},
-		},
-	}
+	// Re-create the mockChain to simulate an offline backing node.
+	// ConstructionParse() is supposed to be called on a dcrros instance
+	// that is offline.
+	offlineChain := newMockChain(t, params)
 
 	// Initialize the server.
 	cfg := &ServerConfig{
 		ChainParams: params,
 		DBType:      dbTypePreconfigured,
-		c:           c,
+		c:           offlineChain,
 	}
 	svr := newTestServer(t, cfg)
 
@@ -1017,12 +1015,6 @@ func TestConstructionParseEndpoint(t *testing.T) {
 		wantSigners: []*rtypes.AccountIdentifier{debitSigner, debitSigner,
 			debitSigner},
 	}, {
-		name:    "debit that references unknown tx",
-		ins:     []*wire.TxIn{debitNoPrevTxIn},
-		outs:    []*wire.TxOut{creditOut},
-		signed:  false,
-		wantErr: types.ErrPrevOutTxNotFound,
-	}, {
 		name: "invalid hex",
 		forceReq: &rtypes.ConstructionParseRequest{
 			Transaction: "xx",
@@ -1063,14 +1055,17 @@ func TestConstructionParseEndpoint(t *testing.T) {
 			}
 		}
 
-		txBytes, err := tx.Bytes()
-		require.NoError(t, err)
-
 		req := tc.forceReq
 		if req == nil {
+			ctrtx := new(constructionTx)
+			ctrtx.tx = tx
+			ctrtx.prevOutPoints, err = types.ExtractPrevInputsFromOps(tc.wantOps, params)
+			require.NoError(t, err)
+			sertx, err := ctrtx.serialize()
+			require.NoError(t, err)
 			req = &rtypes.ConstructionParseRequest{
 				Signed:      tc.signed,
-				Transaction: hex.EncodeToString(txBytes),
+				Transaction: sertx,
 			}
 		}
 		res, rerr := svr.ConstructionParse(context.Background(), req)
@@ -1289,10 +1284,15 @@ func TestConstructionCombine(t *testing.T) {
 			sigs = append(sigs, sig)
 		}
 
-		txBytes, err := tx.Bytes()
+		var err error
+		ctrtx := new(constructionTx)
+		ctrtx.tx = tx
+		ctrtx.prevOutPoints, err = types.ExtractPrevInputsFromOps(tc.debits, params)
+		require.NoError(t, err)
+		serTx, err := ctrtx.serialize()
 		require.NoError(t, err)
 		req := &rtypes.ConstructionCombineRequest{
-			UnsignedTransaction: hex.EncodeToString(txBytes),
+			UnsignedTransaction: serTx,
 			Signatures:          sigs,
 		}
 
@@ -1310,10 +1310,10 @@ func TestConstructionCombine(t *testing.T) {
 			return
 		}
 
-		var gotTx wire.MsgTx
-		if err := gotTx.FromBytes(mustHex(res.SignedTransaction)); err != nil {
-			t.Fatalf("unexpected error decoding resulting tx: %v", err)
-		}
+		ctrtx = new(constructionTx)
+		err = ctrtx.deserialize(res.SignedTransaction)
+		require.NoError(t, err)
+		gotTx := ctrtx.tx
 		if len(gotTx.TxIn) != len(tx.TxIn) {
 			t.Fatalf("unexpected number of inputs. want=%d got=%d",
 				len(tx.TxIn), len(gotTx.TxIn))
@@ -1343,9 +1343,14 @@ func TestConstructionHashEndpoint(t *testing.T) {
 	dummyTx.AddTxIn(wire.NewTxIn(&wire.OutPoint{}, 0, nil))
 	dummyTx.AddTxOut(wire.NewTxOut(0, nil))
 	dummyTxh := dummyTx.TxHash()
-	dummyTxBytes, err := dummyTx.Bytes()
+	ctrtx := &constructionTx{
+		tx: dummyTx,
+		prevOutPoints: map[wire.OutPoint]*types.PrevInput{
+			{}: {},
+		},
+	}
+	dummyTxHex, err := ctrtx.serialize()
 	require.NoError(t, err)
-	dummyTxHex := hex.EncodeToString(dummyTxBytes)
 
 	// Initialize the server.
 	cfg := &ServerConfig{
@@ -1374,7 +1379,7 @@ func TestConstructionHashEndpoint(t *testing.T) {
 		wantErr: types.ErrInvalidHexString,
 	}, {
 		name:    "invalid tx",
-		tx:      dummyTxHex[:4] + "ffff" + dummyTxHex[8:], // Break sertype.
+		tx:      dummyTxHex[:5] + "ffff" + dummyTxHex[9:], // Break sertype.
 		wantErr: types.ErrInvalidTransaction,
 	}}
 
@@ -1418,9 +1423,14 @@ func TestConstructionSubmitEndpoint(t *testing.T) {
 	dummyTx.AddTxIn(wire.NewTxIn(&wire.OutPoint{}, 0, nil))
 	dummyTx.AddTxOut(wire.NewTxOut(0, nil))
 	dummyTxh := dummyTx.TxHash()
-	dummyTxBytes, err := dummyTx.Bytes()
+	ctrtx := &constructionTx{
+		tx: dummyTx,
+		prevOutPoints: map[wire.OutPoint]*types.PrevInput{
+			{}: {},
+		},
+	}
+	dummyTxHex, err := ctrtx.serialize()
 	require.NoError(t, err)
-	dummyTxHex := hex.EncodeToString(dummyTxBytes)
 
 	// Initialize the server.
 	cfg := &ServerConfig{

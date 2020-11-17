@@ -429,13 +429,21 @@ func (s *Server) ConstructionPayloads(ctx context.Context,
 		return nil, types.RError(err)
 	}
 
-	bts, err := tx.Bytes()
+	// Convert into and serialize a construction-api tx with additional
+	// data.
+	ctrtx := new(constructionTx)
+	ctrtx.tx = tx
+	ctrtx.prevOutPoints, err = types.ExtractPrevInputsFromOps(req.Operations, s.chainParams)
+	if err != nil {
+		return nil, types.RError(err)
+	}
+	unsignedTx, err := ctrtx.serialize()
 	if err != nil {
 		return nil, types.RError(err)
 	}
 
 	return &rtypes.ConstructionPayloadsResponse{
-		UnsignedTransaction: hex.EncodeToString(bts),
+		UnsignedTransaction: unsignedTx,
 		Payloads:            payloads,
 	}, nil
 }
@@ -452,25 +460,20 @@ func (s *Server) ConstructionPayloads(ctx context.Context,
 func (s *Server) ConstructionParse(ctx context.Context,
 	req *rtypes.ConstructionParseRequest) (*rtypes.ConstructionParseResponse, *rtypes.Error) {
 
-	txBytes, err := hex.DecodeString(req.Transaction)
-	if err != nil {
-		return nil, types.ErrInvalidHexString.RError()
-	}
-
-	tx := wire.NewMsgTx()
-	if err := tx.FromBytes(txBytes); err != nil {
-		return nil, types.ErrInvalidTransaction.RError()
+	ctrtx := new(constructionTx)
+	if err := ctrtx.deserialize(req.Transaction); err != nil {
+		return nil, types.RError(err)
 	}
 
 	// We use the the MempoolTxToRosetta function to do the conversion
 	// since it's likely this tx will be broadcast in a moment.
-	fetchInputs := s.makeInputsFetcher(ctx, nil)
-	rtx, err := types.MempoolTxToRosetta(tx, fetchInputs, s.chainParams)
+	fetchInputs := s.makeInputsFetcher(ctx, ctrtx.prevOutPoints)
+	rtx, err := types.MempoolTxToRosetta(ctrtx.tx, fetchInputs, s.chainParams)
 	if err != nil {
 		return nil, types.RError(err)
 	}
 
-	signers, err := types.ExtractTxSigners(rtx.Operations, tx, s.chainParams)
+	signers, err := types.ExtractTxSigners(rtx.Operations, ctrtx.tx, s.chainParams)
 	if err != nil {
 		return nil, types.RError(err)
 	}
@@ -498,26 +501,21 @@ func (s *Server) ConstructionParse(ctx context.Context,
 func (s *Server) ConstructionCombine(ctx context.Context,
 	req *rtypes.ConstructionCombineRequest) (*rtypes.ConstructionCombineResponse, *rtypes.Error) {
 
-	txBytes, err := hex.DecodeString(req.UnsignedTransaction)
-	if err != nil {
-		return nil, types.ErrInvalidHexString.RError()
-	}
-
-	tx := &wire.MsgTx{}
-	if err := tx.FromBytes(txBytes); err != nil {
-		return nil, types.ErrInvalidTransaction.RError()
-	}
-
-	if err := types.CombineTxSigs(req.Signatures, tx, s.chainParams); err != nil {
+	ctrtx := new(constructionTx)
+	if err := ctrtx.deserialize(req.UnsignedTransaction); err != nil {
 		return nil, types.RError(err)
 	}
 
-	bts, err := tx.Bytes()
+	if err := types.CombineTxSigs(req.Signatures, ctrtx.tx, s.chainParams); err != nil {
+		return nil, types.RError(err)
+	}
+
+	signedTx, err := ctrtx.serialize()
 	if err != nil {
 		return nil, types.RError(err)
 	}
 	return &rtypes.ConstructionCombineResponse{
-		SignedTransaction: hex.EncodeToString(bts),
+		SignedTransaction: signedTx,
 	}, nil
 }
 
@@ -527,19 +525,14 @@ func (s *Server) ConstructionCombine(ctx context.Context,
 func (s *Server) ConstructionHash(ctx context.Context,
 	req *rtypes.ConstructionHashRequest) (*rtypes.TransactionIdentifierResponse, *rtypes.Error) {
 
-	txBytes, err := hex.DecodeString(req.SignedTransaction)
-	if err != nil {
-		return nil, types.ErrInvalidHexString.RError()
-	}
-
-	tx := &wire.MsgTx{}
-	if err := tx.FromBytes(txBytes); err != nil {
-		return nil, types.ErrInvalidTransaction.RError()
+	ctrtx := new(constructionTx)
+	if err := ctrtx.deserialize(req.SignedTransaction); err != nil {
+		return nil, types.RError(err)
 	}
 
 	return &rtypes.TransactionIdentifierResponse{
 		TransactionIdentifier: &rtypes.TransactionIdentifier{
-			Hash: tx.TxHash().String(),
+			Hash: ctrtx.tx.TxHash().String(),
 		},
 	}, nil
 }
@@ -550,18 +543,12 @@ func (s *Server) ConstructionHash(ctx context.Context,
 func (s *Server) ConstructionSubmit(ctx context.Context,
 	req *rtypes.ConstructionSubmitRequest) (*rtypes.TransactionIdentifierResponse, *rtypes.Error) {
 
-	txBytes, err := hex.DecodeString(req.SignedTransaction)
-	if err != nil {
-		return nil, types.ErrInvalidHexString.RError()
+	ctrtx := new(constructionTx)
+	if err := ctrtx.deserialize(req.SignedTransaction); err != nil {
+		return nil, types.RError(err)
 	}
 
-	tx := new(wire.MsgTx)
-	err = tx.FromBytes(txBytes)
-	if err != nil {
-		return nil, types.ErrInvalidTransaction.RError()
-	}
-
-	txh, err := s.c.SendRawTransaction(ctx, tx, false)
+	txh, err := s.c.SendRawTransaction(ctx, ctrtx.tx, false)
 	if err != nil {
 		// Handle some special cases from dcrd into different error
 		// codes.
