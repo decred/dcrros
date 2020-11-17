@@ -437,10 +437,7 @@ func TestConstructionPayloadsEndpoint(t *testing.T) {
 	c := newMockChain(t, params)
 
 	// Shorter function names to improve readability.
-	amt := types.DcrAmountToRosetta
-	prevHash1 := "574dfd8c1b169acfdfc245d4402346ea4d1aea8806e722e0be5796effa75767c"
-	pksEcdsa := "76a9144dab7c134c8b5f277b6ef9175e4d617e88d6d40088ac"
-	addrEcdsa := "RsFRVNutxrodAcBuCLMNstc1XU1SMTWyqNo"
+	addrEcdsa := mustAddr("RsFRVNutxrodAcBuCLMNstc1XU1SMTWyqNo", params)
 	expiry := uint32(2000)
 	locktime := uint32(3000)
 	version := uint16(3)
@@ -450,73 +447,16 @@ func TestConstructionPayloadsEndpoint(t *testing.T) {
 		"version":  version,
 	}
 
-	// debit & debitIn define the same input.
-	debit := &rtypes.Operation{
-		Type:   "debit",
-		Amount: amt(-10),
-		Metadata: map[string]interface{}{
-			"prev_tree": int8(1),
-			"sequence":  uint32(1000),
-		},
-		Account: &rtypes.AccountIdentifier{
-			Address: addrEcdsa,
-			Metadata: map[string]interface{}{
-				"script_version": uint16(0),
-			},
-		},
-		CoinChange: &rtypes.CoinChange{
-			CoinIdentifier: &rtypes.CoinIdentifier{
-				Identifier: prevHash1 + ":1",
-			},
-			CoinAction: rtypes.CoinSpent,
-		},
-	}
-	debitIn := &wire.TxIn{
-		PreviousOutPoint: wire.OutPoint{
-			Hash:  mustHash(prevHash1),
-			Index: 1,
-			Tree:  1,
-		},
-		ValueIn:    10,
-		BlockIndex: wire.NullBlockIndex,
-		Sequence:   1000,
-	}
+	// Use 3 different debits so we spend 3 different outputs, otherwise
+	// serializing the tx fails.
+	debit1, debitIn1 := c.genDebit(10, addrEcdsa)
+	debit2, debitIn2 := c.genDebit(10, addrEcdsa)
+	debit3, debitIn3 := c.genDebit(10, addrEcdsa)
 	debitPayload := &rtypes.SigningPayload{
-		AccountIdentifier: &rtypes.AccountIdentifier{
-			Address: addrEcdsa,
-			Metadata: map[string]interface{}{
-				"script_version": 0,
-			},
-		},
-		SignatureType: rtypes.Ecdsa,
+		AccountIdentifier: debit1.Account,
+		SignatureType:     rtypes.Ecdsa,
 	}
-
-	// credit and creditOut define the same output.
-	credit := &rtypes.Operation{
-		Type:   "credit",
-		Amount: amt(20),
-		Metadata: map[string]interface{}{
-			"pk_script": pksEcdsa,
-		},
-		Account: &rtypes.AccountIdentifier{
-			Address: addrEcdsa,
-			Metadata: map[string]interface{}{
-				"script_version": uint16(0),
-			},
-		},
-		CoinChange: &rtypes.CoinChange{
-			CoinIdentifier: &rtypes.CoinIdentifier{
-				Identifier: "xxxxx:0",
-			},
-			CoinAction: rtypes.CoinCreated,
-		},
-	}
-	creditOut := &wire.TxOut{
-		Value:    20,
-		PkScript: mustHex(pksEcdsa),
-		Version:  0,
-	}
-
+	credit, creditOut := c.genCredit(20, addrEcdsa)
 	invalidOp := &rtypes.Operation{Type: "invalid"}
 
 	// Initialize the server.
@@ -540,21 +480,21 @@ func TestConstructionPayloadsEndpoint(t *testing.T) {
 		name: "1 credit 1 debit",
 		req: &rtypes.ConstructionPayloadsRequest{
 			Metadata:   txMeta,
-			Operations: []*rtypes.Operation{debit, credit},
+			Operations: []*rtypes.Operation{debit1, credit},
 		},
 		wantErr:      nil,
-		ins:          []*wire.TxIn{debitIn},
+		ins:          []*wire.TxIn{debitIn1},
 		outs:         []*wire.TxOut{creditOut},
 		wantPayloads: []*rtypes.SigningPayload{debitPayload},
 	}, {
 		name: "3 credits 3 debits",
 		req: &rtypes.ConstructionPayloadsRequest{
 			Metadata: txMeta,
-			Operations: []*rtypes.Operation{debit, debit, debit,
+			Operations: []*rtypes.Operation{debit1, debit2, debit3,
 				credit, credit, credit},
 		},
 		wantErr: nil,
-		ins:     []*wire.TxIn{debitIn, debitIn, debitIn},
+		ins:     []*wire.TxIn{debitIn1, debitIn2, debitIn3},
 		outs:    []*wire.TxOut{creditOut, creditOut, creditOut},
 		wantPayloads: []*rtypes.SigningPayload{debitPayload, debitPayload,
 			debitPayload},
@@ -565,7 +505,7 @@ func TestConstructionPayloadsEndpoint(t *testing.T) {
 			Operations: []*rtypes.Operation{invalidOp},
 		},
 		wantErr:      types.ErrInvalidOp,
-		ins:          []*wire.TxIn{debitIn},
+		ins:          []*wire.TxIn{debitIn1},
 		outs:         []*wire.TxOut{creditOut},
 		wantPayloads: []*rtypes.SigningPayload{debitPayload},
 	}}
@@ -622,9 +562,9 @@ func TestConstructionPayloadsEndpoint(t *testing.T) {
 					wantAccount.Address, gotAccount.Address)
 			}
 
-			wantVersion := wantAccount.Metadata["script_version"].(int)
+			wantVersion := wantAccount.Metadata["script_version"].(uint16)
 			gotVersion := gotAccount.Metadata["script_version"].(uint16)
-			if wantVersion != int(gotVersion) {
+			if wantVersion != gotVersion {
 				t.Fatalf("unexpected version. want=%d got=%d",
 					wantVersion, gotVersion)
 			}
@@ -636,7 +576,7 @@ func TestConstructionPayloadsEndpoint(t *testing.T) {
 
 			// Calculate the expected sighash given the test tx.
 			wantSigHash, err := txscript.CalcSignatureHash(
-				mustHex(pksEcdsa), txscript.SigHashAll, wantTx,
+				creditOut.PkScript, txscript.SigHashAll, wantTx,
 				i, nil)
 			if err != nil {
 				t.Fatalf("unable to calc sighash: %v", err)
@@ -663,78 +603,20 @@ func TestConstructionParseEndpoint(t *testing.T) {
 	c := newMockChain(t, params)
 
 	// Shorter function names to improve readability.
-	amt := types.DcrAmountToRosetta
 	privKey := mustHex("c387ce35ba8e5d6a566f76c2cf5b055b3a01fe9fd5e5856e93aca8f6d3405696")
 	pksEcdsa := "76a9144dab7c134c8b5f277b6ef9175e4d617e88d6d40088ac"
-	prevHash1 := c.addSudoTx(10, mustHex(pksEcdsa)).String() // Tx needs to exist in the chain.
-	addrEcdsa := "RsFRVNutxrodAcBuCLMNstc1XU1SMTWyqNo"
+	addrEcdsa := mustAddr("RsFRVNutxrodAcBuCLMNstc1XU1SMTWyqNo", params)
 	expiry := uint32(2000)
 	locktime := uint32(3000)
 	version := uint16(3)
 
-	// debit & debitIn define the same input.
-	debit := &rtypes.Operation{
-		Type:   "debit",
-		Amount: amt(-10),
-		Metadata: map[string]interface{}{
-			"prev_tree": int8(1),
-			"sequence":  uint32(1000),
-		},
-		Account: &rtypes.AccountIdentifier{
-			Address: addrEcdsa,
-			Metadata: map[string]interface{}{
-				"script_version": uint16(0),
-			},
-		},
-		CoinChange: &rtypes.CoinChange{
-			CoinIdentifier: &rtypes.CoinIdentifier{
-				Identifier: prevHash1 + ":0",
-			},
-			CoinAction: rtypes.CoinSpent,
-		},
-	}
-	debitIn := &wire.TxIn{
-		PreviousOutPoint: wire.OutPoint{
-			Hash:  mustHash(prevHash1),
-			Index: 0,
-			Tree:  1,
-		},
-		ValueIn:    10,
-		BlockIndex: wire.NullBlockIndex,
-		Sequence:   1000,
-	}
-	debitSigner := &rtypes.AccountIdentifier{
-		Address: addrEcdsa,
-		Metadata: map[string]interface{}{
-			"script_version": 0,
-		},
-	}
-
-	// credit and creditOut define the same output.
-	credit := &rtypes.Operation{
-		Type:   "credit",
-		Amount: amt(20),
-		Metadata: map[string]interface{}{
-			"pk_script": pksEcdsa,
-		},
-		Account: &rtypes.AccountIdentifier{
-			Address: addrEcdsa,
-			Metadata: map[string]interface{}{
-				"script_version": uint16(0),
-			},
-		},
-		CoinChange: &rtypes.CoinChange{
-			CoinIdentifier: &rtypes.CoinIdentifier{
-				Identifier: "xxxxx:0",
-			},
-			CoinAction: rtypes.CoinCreated,
-		},
-	}
-	creditOut := &wire.TxOut{
-		Value:    20,
-		PkScript: mustHex(pksEcdsa),
-		Version:  0,
-	}
+	// Generate 3 different debits that spend from different outputs,
+	// otherwise serialization fails.
+	debit1, debitIn1 := c.genDebit(10, addrEcdsa)
+	debit2, debitIn2 := c.genDebit(10, addrEcdsa)
+	debit3, debitIn3 := c.genDebit(10, addrEcdsa)
+	debitSigner := debit1.Account
+	credit, creditOut := c.genCredit(20, addrEcdsa)
 
 	// Debit that references a tx not found either mined or in the mempool.
 	debitNoPrevTxIn := &wire.TxIn{
@@ -764,32 +646,32 @@ func TestConstructionParseEndpoint(t *testing.T) {
 
 	testCases := []testCase{{
 		name:        "1 credit 1 debit unsigned",
-		ins:         []*wire.TxIn{debitIn},
+		ins:         []*wire.TxIn{debitIn1},
 		outs:        []*wire.TxOut{creditOut},
 		signed:      false,
-		wantOps:     []*rtypes.Operation{debit, credit},
+		wantOps:     []*rtypes.Operation{debit1, credit},
 		wantSigners: []*rtypes.AccountIdentifier{},
 	}, {
 		name:        "1 credit 1 debit signed",
-		ins:         []*wire.TxIn{debitIn},
+		ins:         []*wire.TxIn{debitIn1},
 		outs:        []*wire.TxOut{creditOut},
 		signed:      true,
-		wantOps:     []*rtypes.Operation{debit, credit},
+		wantOps:     []*rtypes.Operation{debit1, credit},
 		wantSigners: []*rtypes.AccountIdentifier{debitSigner},
 	}, {
 		name:   "3 credits 3 debits unsigned",
-		ins:    []*wire.TxIn{debitIn, debitIn, debitIn},
+		ins:    []*wire.TxIn{debitIn1, debitIn2, debitIn3},
 		outs:   []*wire.TxOut{creditOut, creditOut, creditOut},
 		signed: false,
-		wantOps: []*rtypes.Operation{debit, debit, debit, credit,
+		wantOps: []*rtypes.Operation{debit1, debit2, debit3, credit,
 			credit, credit},
 		wantSigners: []*rtypes.AccountIdentifier{},
 	}, {
 		name:   "3 credits 3 debits signed",
-		ins:    []*wire.TxIn{debitIn, debitIn, debitIn},
+		ins:    []*wire.TxIn{debitIn1, debitIn2, debitIn3},
 		outs:   []*wire.TxOut{creditOut, creditOut, creditOut},
 		signed: true,
-		wantOps: []*rtypes.Operation{debit, debit, debit, credit,
+		wantOps: []*rtypes.Operation{debit1, debit2, debit3, credit,
 			credit, credit},
 		wantSigners: []*rtypes.AccountIdentifier{debitSigner, debitSigner,
 			debitSigner},
@@ -808,7 +690,7 @@ func TestConstructionParseEndpoint(t *testing.T) {
 	}, {
 		name: "invalid tx",
 		forceReq: &rtypes.ConstructionParseRequest{
-			Transaction: "0000ffff",
+			Transaction: "010000ffff",
 		},
 		wantErr: types.ErrInvalidTransaction,
 	}}
@@ -816,6 +698,7 @@ func TestConstructionParseEndpoint(t *testing.T) {
 	// test is the actual test function.
 	test := func(t *testing.T, tc *testCase) {
 		t.Parallel()
+		var err error
 
 		tx := &wire.MsgTx{
 			Version:  version,
@@ -899,9 +782,9 @@ func TestConstructionParseEndpoint(t *testing.T) {
 					wantAccount.Address, gotAccount.Address)
 			}
 
-			wantVersion := wantAccount.Metadata["script_version"].(int)
+			wantVersion := wantAccount.Metadata["script_version"].(uint16)
 			gotVersion := gotAccount.Metadata["script_version"].(uint16)
-			if wantVersion != int(gotVersion) {
+			if wantVersion != gotVersion {
 				t.Fatalf("unexpected version. want=%d got=%d",
 					wantVersion, gotVersion)
 			}
@@ -923,8 +806,9 @@ func TestConstructionCombine(t *testing.T) {
 	// Shorter function names to improve readability.
 	privKey := mustHex("c387ce35ba8e5d6a566f76c2cf5b055b3a01fe9fd5e5856e93aca8f6d3405696")
 	pubKey := mustHex("0367c9d81503f8f2e5dcadce43f199073d485fd422866d7638af5a1d4134a9c429")
-	pksEcdsa := "76a9144dab7c134c8b5f277b6ef9175e4d617e88d6d40088ac"
-	prevHash1 := c.addSudoTx(10, mustHex(pksEcdsa)).String() // Tx needs to exist in the chain.
+	addrEcdsa := mustAddr("RsFRVNutxrodAcBuCLMNstc1XU1SMTWyqNo", params)
+	pksEcdsa, err := txscript.PayToAddrScript(addrEcdsa)
+	require.NoError(t, err)
 	expiry := uint32(2000)
 	locktime := uint32(3000)
 	version := uint16(3)
@@ -934,25 +818,20 @@ func TestConstructionCombine(t *testing.T) {
 		CurveType: rtypes.Secp256k1,
 	}
 
-	inEcdsaSecp256k1 := &wire.TxIn{
-		PreviousOutPoint: wire.OutPoint{
-			Hash:  mustHash(prevHash1),
-			Index: 0,
-			Tree:  1,
-		},
-		ValueIn:    10,
-		BlockIndex: wire.NullBlockIndex,
-		Sequence:   1000,
-	}
+	// Create 3 different debits in order to correctly serialize prev outs
+	// when testing a combine of multiple signatures.
+	debitEcdsaSecp256k1_0, inEcdsaSecp256k1_0 := c.genDebit(10, addrEcdsa)
+	debitEcdsaSecp256k1_1, inEcdsaSecp256k1_1 := c.genDebit(10, addrEcdsa)
+	debitEcdsaSecp256k1_2, inEcdsaSecp256k1_2 := c.genDebit(10, addrEcdsa)
 
 	out := &wire.TxOut{
 		Value:    20,
-		PkScript: mustHex(pksEcdsa),
+		PkScript: []byte{},
 		Version:  0,
 	}
 
 	genSigEcdsaSecp256k1 := func(t *testing.T, tx *wire.MsgTx, i int) ([]byte, []byte) {
-		sigHash, err := txscript.CalcSignatureHash(mustHex(pksEcdsa),
+		sigHash, err := txscript.CalcSignatureHash(pksEcdsa,
 			txscript.SigHashAll, tx, i, nil)
 		require.NoError(t, err)
 
@@ -985,6 +864,7 @@ func TestConstructionCombine(t *testing.T) {
 		pubkeys  []*rtypes.PublicKey
 		sigTypes []rtypes.SignatureType
 		ins      []*wire.TxIn
+		debits   []*rtypes.Operation
 		genSigs  []genSig
 		wantErr  error
 		wantSigs []bool
@@ -994,7 +874,8 @@ func TestConstructionCombine(t *testing.T) {
 		name:     "combine 1 secp256k1 ecdsa input",
 		pubkeys:  []*rtypes.PublicKey{pubkeySecp256k1},
 		sigTypes: []rtypes.SignatureType{rtypes.Ecdsa},
-		ins:      []*wire.TxIn{inEcdsaSecp256k1},
+		ins:      []*wire.TxIn{inEcdsaSecp256k1_0},
+		debits:   []*rtypes.Operation{debitEcdsaSecp256k1_0},
 		genSigs:  []genSig{genSigEcdsaSecp256k1},
 		wantErr:  nil,
 		wantSigs: []bool{true},
@@ -1002,7 +883,8 @@ func TestConstructionCombine(t *testing.T) {
 		name:     "combine 3 secp256k1 ecdsa inputs",
 		pubkeys:  []*rtypes.PublicKey{pubkeySecp256k1, pubkeySecp256k1, pubkeySecp256k1},
 		sigTypes: []rtypes.SignatureType{rtypes.Ecdsa, rtypes.Ecdsa, rtypes.Ecdsa},
-		ins:      []*wire.TxIn{inEcdsaSecp256k1, inEcdsaSecp256k1, inEcdsaSecp256k1},
+		ins:      []*wire.TxIn{inEcdsaSecp256k1_0, inEcdsaSecp256k1_1, inEcdsaSecp256k1_2},
+		debits:   []*rtypes.Operation{debitEcdsaSecp256k1_0, debitEcdsaSecp256k1_1, debitEcdsaSecp256k1_2},
 		genSigs:  []genSig{genSigEcdsaSecp256k1, genSigEcdsaSecp256k1, genSigEcdsaSecp256k1},
 		wantErr:  nil,
 		wantSigs: []bool{true, true, true},
@@ -1010,21 +892,24 @@ func TestConstructionCombine(t *testing.T) {
 		name:     "send incorrect nb of sigs",
 		pubkeys:  []*rtypes.PublicKey{pubkeySecp256k1, pubkeySecp256k1, pubkeySecp256k1},
 		sigTypes: []rtypes.SignatureType{rtypes.Ecdsa, rtypes.Ecdsa, rtypes.Ecdsa},
-		ins:      []*wire.TxIn{inEcdsaSecp256k1, inEcdsaSecp256k1, inEcdsaSecp256k1},
+		ins:      []*wire.TxIn{inEcdsaSecp256k1_0, inEcdsaSecp256k1_1, inEcdsaSecp256k1_2},
+		debits:   []*rtypes.Operation{debitEcdsaSecp256k1_0, debitEcdsaSecp256k1_1, debitEcdsaSecp256k1_2},
 		genSigs:  []genSig{genSigEcdsaSecp256k1, genSigEcdsaSecp256k1},
 		wantErr:  types.ErrIncorrectSigCount,
 	}, {
 		name:     "send unknown sig type",
 		pubkeys:  []*rtypes.PublicKey{pubkeySecp256k1},
 		sigTypes: []rtypes.SignatureType{"***"},
-		ins:      []*wire.TxIn{inEcdsaSecp256k1},
+		ins:      []*wire.TxIn{inEcdsaSecp256k1_0},
+		debits:   []*rtypes.Operation{debitEcdsaSecp256k1_0},
 		genSigs:  []genSig{genSigEcdsaSecp256k1},
 		wantErr:  types.ErrUnsupportedSignatureType,
 	}, {
 		name:     "send invalid sig",
 		pubkeys:  []*rtypes.PublicKey{pubkeySecp256k1},
 		sigTypes: []rtypes.SignatureType{rtypes.Ecdsa},
-		ins:      []*wire.TxIn{inEcdsaSecp256k1},
+		ins:      []*wire.TxIn{inEcdsaSecp256k1_0},
+		debits:   []*rtypes.Operation{debitEcdsaSecp256k1_0},
 		genSigs:  []genSig{genInvalidSigEcdsaSecp256k1},
 		wantErr:  types.ErrInvalidSig,
 		wantSigs: []bool{true},
@@ -1034,7 +919,7 @@ func TestConstructionCombine(t *testing.T) {
 		wantErr: types.ErrInvalidHexString,
 	}, {
 		name:    "invalid tx",
-		forceTx: "0000ffff",
+		forceTx: "010000ffff",
 		wantErr: types.ErrInvalidTransaction,
 	}}
 

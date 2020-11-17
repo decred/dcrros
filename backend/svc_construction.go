@@ -62,7 +62,16 @@ func (s *Server) ConstructionDerive(ctx context.Context,
 	if !ok {
 		return nil, types.ErrUnspecifiedAddressVersion.RError()
 	}
-	if version != float64(0) {
+	var wantVers interface{}
+	switch version.(type) {
+	case uint16:
+		wantVers = uint16(0)
+	case float64:
+		wantVers = float64(0)
+	case int:
+		wantVers = int(0)
+	}
+	if version != wantVers {
 		return nil, types.ErrUnsupportedAddressVersion.RError()
 	}
 
