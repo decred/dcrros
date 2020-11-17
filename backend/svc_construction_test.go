@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"testing"
 
@@ -202,6 +203,346 @@ func TestConstructionDeriveEndpoint(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) { test(t, &tc) })
 	}
+}
+
+// TestConstructionTxSerialize ensures the constructionTx serialize() method
+// works as expected.
+func TestConstructionTxSerialize(t *testing.T) {
+
+	type testCase struct {
+		name    string
+		ctx     *constructionTx
+		wantStr string
+		wantErr error
+	}
+
+	// Helpful vars.
+	prevOut1 := wire.OutPoint{Index: 2, Tree: 1}
+	copy(prevOut1.Hash[:], bytes.Repeat([]byte{0x01}, 32))
+	prevOut2 := wire.OutPoint{Index: 3, Tree: 0}
+	copy(prevOut2.Hash[:], bytes.Repeat([]byte{0x18}, 32))
+	slice1 := bytes.Repeat([]byte{0xac}, 10)
+	slice2 := bytes.Repeat([]byte{0x1e}, 10)
+	slice3 := bytes.Repeat([]byte{0x65}, 10)
+
+	testCases := []testCase{{
+		name: "no inputs, no outputs, no prevouts",
+		ctx: &constructionTx{
+			tx: &wire.MsgTx{
+				TxIn:  []*wire.TxIn{},
+				TxOut: []*wire.TxOut{},
+			},
+			prevOutPoints: map[wire.OutPoint]*types.PrevInput{},
+		},
+		wantStr: "0100000000000000000000000000000000",
+	}, {
+		name: "one input, one output both empty",
+		ctx: &constructionTx{
+			tx: &wire.MsgTx{
+				TxIn:  []*wire.TxIn{{SignatureScript: []byte{}}},
+				TxOut: []*wire.TxOut{{PkScript: []byte{}}},
+			},
+			prevOutPoints: map[wire.OutPoint]*types.PrevInput{
+				{}: {PkScript: []byte{}},
+			},
+		},
+		wantStr: "01000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000010000000000000000000000000000000000010000000000000000000000",
+	}, {
+		name: "one input, one output, filled data",
+		ctx: &constructionTx{
+			tx: &wire.MsgTx{
+				Version:  0x7676,
+				LockTime: 0x54545454,
+				Expiry:   0x38383838,
+				TxIn: []*wire.TxIn{{
+					PreviousOutPoint: prevOut1,
+					Sequence:         0x91919191,
+					ValueIn:          0x3a3a3a3a3a3a3a3a,
+					BlockHeight:      0x78787878,
+					BlockIndex:       0x53535353,
+					SignatureScript:  slice1,
+				}},
+				TxOut: []*wire.TxOut{{
+					Value:    0x4a4a4a4a4a4a4a4a,
+					Version:  0x2121,
+					PkScript: slice2,
+				}},
+			},
+			prevOutPoints: map[wire.OutPoint]*types.PrevInput{
+				prevOut1: {
+					Amount:   0x2121212121212121,
+					Version:  0x8787,
+					PkScript: slice3,
+				},
+			},
+		},
+		wantStr: "0176760000010101010101010101010101010101010101010101010101010101010101010101020000000191919191014a4a4a4a4a4a4a4a21210a1e1e1e1e1e1e1e1e1e1e5454545438383838013a3a3a3a3a3a3a3a78787878535353530aacacacacacacacacacac01212121212121212187870a65656565656565656565",
+	}, {
+		name: "two inputs, one output",
+		ctx: &constructionTx{
+			tx: &wire.MsgTx{
+				Version:  0x7676,
+				LockTime: 0x54545454,
+				Expiry:   0x38383838,
+				TxIn: []*wire.TxIn{{
+					PreviousOutPoint: prevOut1,
+					Sequence:         0x91919191,
+					ValueIn:          0x3a3a3a3a3a3a3a3a,
+					BlockHeight:      0x78787878,
+					BlockIndex:       0x53535353,
+					SignatureScript:  slice1,
+				}, {
+					PreviousOutPoint: prevOut2,
+					SignatureScript:  []byte{},
+				}},
+				TxOut: []*wire.TxOut{{
+					Value:    0x4a4a4a4a4a4a4a4a,
+					Version:  0x2121,
+					PkScript: slice2,
+				}},
+			},
+			prevOutPoints: map[wire.OutPoint]*types.PrevInput{
+				prevOut2: {
+					PkScript: []byte{},
+				},
+				prevOut1: {
+					Amount:   0x2121212121212121,
+					Version:  0x8787,
+					PkScript: slice3,
+				},
+			},
+		},
+		wantStr: "01767600000201010101010101010101010101010101010101010101010101010101010101010200000001919191911818181818181818181818181818181818181818181818181818181818181818030000000000000000014a4a4a4a4a4a4a4a21210a1e1e1e1e1e1e1e1e1e1e5454545438383838023a3a3a3a3a3a3a3a78787878535353530aacacacacacacacacacac000000000000000000000000000000000002212121212121212187870a656565656565656565650000000000000000000000",
+	}, {
+		name: "trying to serialize without a corresponding prevOut",
+		ctx: &constructionTx{
+			tx: &wire.MsgTx{
+				TxIn: []*wire.TxIn{{
+					PreviousOutPoint: prevOut1,
+					SignatureScript:  []byte{},
+				}},
+				TxOut: []*wire.TxOut{{PkScript: []byte{}}},
+			},
+			prevOutPoints: map[wire.OutPoint]*types.PrevInput{
+				{}: {PkScript: []byte{}},
+			},
+		},
+		wantErr: errInPrevOutNotFound,
+	}, {
+		name: "trying to serialize incorrect nb of prevouts",
+		ctx: &constructionTx{
+			tx: &wire.MsgTx{
+				TxIn: []*wire.TxIn{{
+					PreviousOutPoint: prevOut1,
+					SignatureScript:  []byte{},
+				}},
+				TxOut: []*wire.TxOut{{PkScript: []byte{}}},
+			},
+			prevOutPoints: map[wire.OutPoint]*types.PrevInput{},
+		},
+		wantErr: errWrongNbPrevOuts,
+	}}
+
+	test := func(t *testing.T, tc *testCase) {
+		gotStr, gotErr := tc.ctx.serialize()
+		if !errors.Is(gotErr, tc.wantErr) {
+			t.Fatalf("unexpected error. want=%v, got=%v", tc.wantErr,
+				gotErr)
+		}
+		if tc.wantErr != nil {
+			return
+		}
+
+		if gotStr != tc.wantStr {
+			t.Fatalf("unexpected serialization. want=%s, got=%s",
+				tc.wantStr, gotStr)
+		}
+
+		// Ensure deserializing produces the exact same tx data if
+		// serialization was not supposed to error.
+		var gotCtx constructionTx
+		if err := gotCtx.deserialize(gotStr); err != nil {
+			t.Fatalf("unexpected deserialization error: %v", err)
+		}
+		require.Equal(t, *tc.ctx, gotCtx)
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) { test(t, &tc) })
+	}
+}
+
+// TestConstructionTxDeserialize ensures the constructionTx deserialize()
+// method works as expected.
+func TestConstructionTxDeserialize(t *testing.T) {
+	type testCase struct {
+		name       string
+		serialized string
+		wantErr    error
+		wantCtx    *constructionTx
+	}
+
+	// Helpful vars.
+	prevOut1 := wire.OutPoint{Index: 2, Tree: 1}
+	copy(prevOut1.Hash[:], bytes.Repeat([]byte{0x01}, 32))
+	prevOut2 := wire.OutPoint{Index: 3, Tree: 0}
+	copy(prevOut2.Hash[:], bytes.Repeat([]byte{0x18}, 32))
+	slice1 := bytes.Repeat([]byte{0xac}, 10)
+	slice2 := bytes.Repeat([]byte{0x1e}, 10)
+	slice3 := bytes.Repeat([]byte{0x65}, 10)
+
+	testCases := []testCase{{
+		name:       "no inputs, no outputs, no prevouts",
+		serialized: "0100000000000000000000000000000000",
+		wantCtx: &constructionTx{
+			tx: &wire.MsgTx{
+				TxIn:  []*wire.TxIn{},
+				TxOut: []*wire.TxOut{},
+			},
+			prevOutPoints: map[wire.OutPoint]*types.PrevInput{},
+		},
+	}, {
+		name:       "one input, one output both empty",
+		serialized: "01000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000010000000000000000000000000000000000010000000000000000000000",
+		wantCtx: &constructionTx{
+			tx: &wire.MsgTx{
+				TxIn:  []*wire.TxIn{{SignatureScript: []byte{}}},
+				TxOut: []*wire.TxOut{{PkScript: []byte{}}},
+			},
+			prevOutPoints: map[wire.OutPoint]*types.PrevInput{
+				{}: {PkScript: []byte{}},
+			},
+		},
+	}, {
+		name:       "one input, one output, filled data",
+		serialized: "0176760000010101010101010101010101010101010101010101010101010101010101010101020000000191919191014a4a4a4a4a4a4a4a21210a1e1e1e1e1e1e1e1e1e1e5454545438383838013a3a3a3a3a3a3a3a78787878535353530aacacacacacacacacacac01212121212121212187870a65656565656565656565",
+		wantCtx: &constructionTx{
+			tx: &wire.MsgTx{
+				Version:  0x7676,
+				LockTime: 0x54545454,
+				Expiry:   0x38383838,
+				TxIn: []*wire.TxIn{{
+					PreviousOutPoint: prevOut1,
+					Sequence:         0x91919191,
+					ValueIn:          0x3a3a3a3a3a3a3a3a,
+					BlockHeight:      0x78787878,
+					BlockIndex:       0x53535353,
+					SignatureScript:  slice1,
+				}},
+				TxOut: []*wire.TxOut{{
+					Value:    0x4a4a4a4a4a4a4a4a,
+					Version:  0x2121,
+					PkScript: slice2,
+				}},
+			},
+			prevOutPoints: map[wire.OutPoint]*types.PrevInput{
+				prevOut1: {
+					Amount:   0x2121212121212121,
+					Version:  0x8787,
+					PkScript: slice3,
+				},
+			},
+		},
+	}, {
+		name:       "two inputs, one output",
+		serialized: "01767600000201010101010101010101010101010101010101010101010101010101010101010200000001919191911818181818181818181818181818181818181818181818181818181818181818030000000000000000014a4a4a4a4a4a4a4a21210a1e1e1e1e1e1e1e1e1e1e5454545438383838023a3a3a3a3a3a3a3a78787878535353530aacacacacacacacacacac000000000000000000000000000000000002212121212121212187870a656565656565656565650000000000000000000000",
+		wantCtx: &constructionTx{
+			tx: &wire.MsgTx{
+				Version:  0x7676,
+				LockTime: 0x54545454,
+				Expiry:   0x38383838,
+				TxIn: []*wire.TxIn{{
+					PreviousOutPoint: prevOut1,
+					Sequence:         0x91919191,
+					ValueIn:          0x3a3a3a3a3a3a3a3a,
+					BlockHeight:      0x78787878,
+					BlockIndex:       0x53535353,
+					SignatureScript:  slice1,
+				}, {
+					PreviousOutPoint: prevOut2,
+					SignatureScript:  []byte{},
+				}},
+				TxOut: []*wire.TxOut{{
+					Value:    0x4a4a4a4a4a4a4a4a,
+					Version:  0x2121,
+					PkScript: slice2,
+				}},
+			},
+			prevOutPoints: map[wire.OutPoint]*types.PrevInput{
+				prevOut2: {
+					PkScript: []byte{},
+				},
+				prevOut1: {
+					Amount:   0x2121212121212121,
+					Version:  0x8787,
+					PkScript: slice3,
+				},
+			},
+		},
+	}, {
+		name:       "invalid hex",
+		serialized: "0100000000000000000000000000000000x",
+		wantErr:    types.ErrInvalidHexString,
+	}, {
+		name:       "unrecognized version 0",
+		serialized: "0076760000010101010101010101010101010101010101010101010101010101010101010101020000000191919191014a4a4a4a4a4a4a4a21210a1e1e1e1e1e1e1e1e1e1e5454545438383838013a3a3a3a3a3a3a3a78787878535353530aacacacacacacacacacac01212121212121212187870a65656565656565656565",
+		wantErr:    errInvalidCtrtxVersion,
+	}, {
+		name:       "broken tx serialization type",
+		serialized: "017676000ff10101010101010101010101010101010101010101010101010101010101010101020000000191919191014a4a4a4a4a4a4a4a21210a1e1e1e1e1e1e1e1e1e1e5454545438383838013a3a3a3a3a3a3a3a78787878535353530aacacacacacacacacacac01212121212121212187870a65656565656565656565",
+		wantErr:    types.ErrInvalidTransaction,
+	}, {
+		name:       "short number of tx bytes",
+		serialized: "01767600000101010101",
+		wantErr:    types.ErrInvalidTransaction,
+	}, {
+		name:       "too few prevouts",
+		serialized: "0176760000010101010101010101010101010101010101010101010101010101010101010101020000000191919191014a4a4a4a4a4a4a4a21210a1e1e1e1e1e1e1e1e1e1e5454545438383838013a3a3a3a3a3a3a3a78787878535353530aacacacacacacacacacac00",
+		wantErr:    errWrongNbPrevOuts,
+	}, {
+		name:       "too many prevouts",
+		serialized: "0176760000010101010101010101010101010101010101010101010101010101010101010101020000000191919191014a4a4a4a4a4a4a4a21210a1e1e1e1e1e1e1e1e1e1e5454545438383838013a3a3a3a3a3a3a3a78787878535353530aacacacacacacacacacac02212121212121212187870a65656565656565656565212121212121212187870a65656565656565656565",
+		wantErr:    errWrongNbPrevOuts,
+	}, {
+		name:       "prevout nb not specified",
+		serialized: "0176760000010101010101010101010101010101010101010101010101010101010101010101020000000191919191014a4a4a4a4a4a4a4a21210a1e1e1e1e1e1e1e1e1e1e5454545438383838013a3a3a3a3a3a3a3a78787878535353530aacacacacacacacacacac",
+		wantErr:    io.EOF,
+	}, {
+		name:       "short read on prevout amount",
+		serialized: "0176760000010101010101010101010101010101010101010101010101010101010101010101020000000191919191014a4a4a4a4a4a4a4a21210a1e1e1e1e1e1e1e1e1e1e5454545438383838013a3a3a3a3a3a3a3a78787878535353530aacacacacacacacacacac0121212121212121",
+		wantErr:    io.EOF,
+	}, {
+		name:       "short read on prevout version",
+		serialized: "0176760000010101010101010101010101010101010101010101010101010101010101010101020000000191919191014a4a4a4a4a4a4a4a21210a1e1e1e1e1e1e1e1e1e1e5454545438383838013a3a3a3a3a3a3a3a78787878535353530aacacacacacacacacacac01212121212121212187",
+		wantErr:    io.EOF,
+	}, {
+		name:       "short read on prevout pkscript size",
+		serialized: "0176760000010101010101010101010101010101010101010101010101010101010101010101020000000191919191014a4a4a4a4a4a4a4a21210a1e1e1e1e1e1e1e1e1e1e5454545438383838013a3a3a3a3a3a3a3a78787878535353530aacacacacacacacacacac0121212121212121218787",
+		wantErr:    io.EOF,
+	}, {
+		name:       "short read on prevout pkscript",
+		serialized: "0176760000010101010101010101010101010101010101010101010101010101010101010101020000000191919191014a4a4a4a4a4a4a4a21210a1e1e1e1e1e1e1e1e1e1e5454545438383838013a3a3a3a3a3a3a3a78787878535353530aacacacacacacacacacac01212121212121212187870a6565",
+		wantErr:    io.EOF,
+	}}
+
+	test := func(t *testing.T, tc *testCase) {
+		var gotCtx constructionTx
+		err := gotCtx.deserialize(tc.serialized)
+		if !errors.Is(err, tc.wantErr) {
+			t.Fatalf("unexpected error. want=%v, got=%v", tc.wantErr, err)
+		}
+		if tc.wantErr != nil {
+			return
+		}
+		require.Equal(t, *tc.wantCtx, gotCtx)
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) { test(t, &tc) })
+	}
+
 }
 
 // TestConstructionPreprocessEndpoint tests that the ConstructionPreprocess()

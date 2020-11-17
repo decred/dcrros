@@ -5,8 +5,13 @@
 package backend
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
 	"strings"
 
 	"decred.org/dcrros/types"
@@ -183,6 +188,222 @@ func (s *Server) ConstructionMetadata(ctx context.Context,
 		Metadata:     map[string]interface{}{},
 		SuggestedFee: []*rtypes.Amount{types.DcrAmountToRosetta(fee)},
 	}, nil
+}
+
+// constructionTx stores transaction info between calls to the Construction API
+// endpoints.
+//
+// Due to the design of the Construction set of Rosetta APIs, additional data
+// besides the raw transaction needs to be sent between a few calls. This
+// structure stores all such data and can serialize and deserialize using a
+// custom binary format.
+//
+// The underlying binary format is as follow:
+//
+//     version byte | binary tx | nb of prevouts | prevouts
+//
+// - [version byte]: 1 byte version
+// - [binary tx]: wire tx, serialized in the standard way
+// - [nb of prevouts]: varint with number of previous outpoits
+// - [prevouts]: variable list of prevouts. Each one is serialized as follows:
+//
+//     amount | version | pk script len | pkscript
+//
+// - [amount]: 8 byte uint64 amount
+// - [version]: 2 byte uint16 version
+// - [pk script len]: varint with size of pkscript slice
+// - [pkscript]: slice of bytes
+//
+// Only version 0x01 is currently supported. The number of prevouts must match
+// the number of tx inputs both when serializing and deserializing.
+type constructionTx struct {
+	tx            *wire.MsgTx
+	prevOutPoints map[wire.OutPoint]*types.PrevInput
+}
+
+var (
+	errWrongNbPrevOuts     = errors.New("wrong nb of tx inputs and prevouts")
+	errInPrevOutNotFound   = errors.New("could not find prevout for input")
+	errInvalidVersionRead  = errors.New("invalidt read of ctrtx version")
+	errInvalidCtrtxVersion = errors.New("unrecognized ctrtx version")
+)
+
+// serialize stores the constructionTx data into a slice of bytes and then
+// encodes that as an hex string.
+func (ctrtx *constructionTx) serialize() (string, error) {
+	// Check some preconditions.
+	//
+	// Len of input and prevouts must match.
+	if len(ctrtx.tx.TxIn) != len(ctrtx.prevOutPoints) {
+		return "", fmt.Errorf("%w: %d inputs, %d prevOuts",
+			errWrongNbPrevOuts, len(ctrtx.tx.TxIn),
+			len(ctrtx.prevOutPoints))
+	}
+
+	// Every txin prevout should be specified in the map.
+	for i := 0; i < len(ctrtx.tx.TxIn); i++ {
+		txInPrevOut := ctrtx.tx.TxIn[i].PreviousOutPoint
+		if _, ok := ctrtx.prevOutPoints[txInPrevOut]; !ok {
+			return "", fmt.Errorf("%w: input %d prevOut %s ",
+				errInPrevOutNotFound, i, txInPrevOut)
+		}
+	}
+
+	// Helpful vars and functions.
+	pver := uint32(0)
+	endian := binary.LittleEndian
+	var b *bytes.Buffer
+	writeUint64 := func(i uint64) error {
+		var aux [8]byte
+		endian.PutUint64(aux[:], i)
+		n, err := b.Write(aux[:])
+		if n != 8 {
+			return fmt.Errorf("short uint64 write")
+		}
+		return err
+	}
+	writeUint16 := func(i uint16) error {
+		var aux [2]byte
+		endian.PutUint16(aux[:], i)
+		n, err := b.Write(aux[:])
+		if n != 2 {
+			return fmt.Errorf("short uint16 write")
+		}
+		return err
+	}
+
+	// Calculate the serialize size in order to allocate a single byte
+	// slice.
+	lenPrevOuts := len(ctrtx.prevOutPoints)
+	size := 1 + // Version byte
+		ctrtx.tx.SerializeSize() + // Tx size
+		wire.VarIntSerializeSize(uint64(lenPrevOuts)) // Nb of prevouts
+	for _, prev := range ctrtx.prevOutPoints {
+		lenPks := len(prev.PkScript)
+		size += 8 + 2 + // Value+Version
+			wire.VarIntSerializeSize(uint64(lenPks)) + lenPks // PkScript
+	}
+
+	// Write the constructionTx version byte.
+	b = bytes.NewBuffer(make([]byte, 0, size))
+	if _, err := b.Write([]byte{0x01}); err != nil {
+		return "", err
+	}
+
+	// Write the original tx.
+	if err := ctrtx.tx.BtcEncode(b, pver); err != nil {
+		return "", err
+	}
+
+	// Write the nb of prevous.
+	if err := wire.WriteVarInt(b, pver, uint64(lenPrevOuts)); err != nil {
+		return "", err
+	}
+
+	// Write each prevout in the same sequence as the transaction inputs.
+	for _, in := range ctrtx.tx.TxIn {
+		prev := ctrtx.prevOutPoints[in.PreviousOutPoint]
+		lenPks := len(prev.PkScript)
+		if err := writeUint64(uint64(prev.Amount)); err != nil {
+			return "", err
+		}
+		if err := writeUint16(prev.Version); err != nil {
+			return "", err
+		}
+		if err := wire.WriteVarInt(b, pver, uint64(lenPks)); err != nil {
+			return "", err
+		}
+		if _, err := b.Write(prev.PkScript); err != nil {
+			return "", err
+		}
+	}
+
+	return hex.EncodeToString(b.Bytes()), nil
+}
+
+// deserialize parses the string into the costructionTx value.
+func (ctrtx *constructionTx) deserialize(s string) error {
+	// Helpful vars and functions.
+	pver := uint32(0)
+	endian := binary.LittleEndian
+	var b *bytes.Buffer
+
+	readAmount := func() (dcrutil.Amount, error) {
+		var aux [8]byte
+		n, err := b.Read(aux[:])
+		if n != 8 {
+			return 0, io.EOF
+		}
+		return dcrutil.Amount(endian.Uint64(aux[:])), err
+	}
+	readUint16 := func() (uint16, error) {
+		var aux [2]byte
+		n, err := b.Read(aux[:])
+		if n != 2 {
+			return 0, io.EOF
+		}
+		return endian.Uint16(aux[:]), err
+	}
+
+	// Decode from hex into a byte buffer.
+	bts, err := hex.DecodeString(s)
+	if err != nil {
+		return types.ErrInvalidHexString
+	}
+	b = bytes.NewBuffer(bts)
+
+	// Deserialize and verify encoding version.
+	var version [1]byte
+	if _, err := b.Read(version[:]); err != nil {
+		return fmt.Errorf("%w: %v", errInvalidVersionRead, err)
+	}
+	if version[0] != 0x01 {
+		return fmt.Errorf("%w: %d", errInvalidCtrtxVersion, version[0])
+	}
+
+	// Deserialize tx.
+	ctrtx.tx = new(wire.MsgTx)
+	if err := ctrtx.tx.BtcDecode(b, pver); err != nil {
+		return types.ErrInvalidTransaction.Msg(err.Error())
+	}
+
+	// Deserialize prevouts.
+	var nbPrevOuts uint64
+	if nbPrevOuts, err = wire.ReadVarInt(b, pver); err != nil {
+		return err
+	}
+	if nbPrevOuts != uint64(len(ctrtx.tx.TxIn)) {
+		return fmt.Errorf("%w: %d inputs, %d prevOuts",
+			errWrongNbPrevOuts, len(ctrtx.tx.TxIn),
+			nbPrevOuts)
+	}
+	ctrtx.prevOutPoints = make(map[wire.OutPoint]*types.PrevInput, nbPrevOuts)
+	for i := 0; i < int(nbPrevOuts); i++ {
+		outp := ctrtx.tx.TxIn[i].PreviousOutPoint
+		prevOut := &types.PrevInput{}
+		if prevOut.Amount, err = readAmount(); err != nil {
+			return err
+		}
+		if prevOut.Version, err = readUint16(); err != nil {
+			return err
+		}
+		var lenPks uint64
+		if lenPks, err = wire.ReadVarInt(b, pver); err != nil {
+			return err
+		}
+		prevOut.PkScript = make([]byte, lenPks)
+		var n int
+		if n, err = b.Read(prevOut.PkScript); err != nil {
+			return err
+		}
+		if uint64(n) != lenPks {
+			return io.EOF
+		}
+
+		ctrtx.prevOutPoints[outp] = prevOut
+	}
+
+	return nil
 }
 
 // ConstructionPayloads returns the payloads that need signing so that the
