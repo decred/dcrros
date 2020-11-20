@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrros/backend/internal/memdb"
 	"decred.org/dcrros/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
@@ -180,6 +181,87 @@ func TestCheckDcrd(t *testing.T) {
 	}
 }
 
+// TestWaitForPeers asserts the waitForPeers function works as intended.
+func TestWaitForPeers(t *testing.T) {
+	t.Parallel()
+	params := chaincfg.SimNetParams()
+
+	type testCase struct {
+		name       string
+		peerCount  int
+		err        error
+		timeout    time.Duration
+		ctxTimeout time.Duration
+		wantErr    error
+	}
+
+	dummyErr := errors.New("dummy")
+
+	testCases := []testCase{{
+		name:       "negative timeout, negative context",
+		timeout:    -1,
+		ctxTimeout: -1,
+		wantErr:    errNoPeersAfterTimeout,
+	}, {
+		name:       "negative timeout, positive context",
+		timeout:    -1,
+		ctxTimeout: time.Second,
+		wantErr:    errNoPeersAfterTimeout,
+	}, {
+		name:       "positive timeout, negative timeout",
+		timeout:    time.Second,
+		ctxTimeout: -1,
+		wantErr:    context.DeadlineExceeded,
+	}, {
+		name:       "GetPeerInfo errored",
+		timeout:    time.Second,
+		ctxTimeout: time.Second,
+		err:        dummyErr,
+		wantErr:    dummyErr,
+	}, {
+		name:       "found peers",
+		timeout:    time.Second,
+		ctxTimeout: time.Second,
+		peerCount:  1,
+	}}
+
+	test := func(t *testing.T, tc *testCase) {
+		t.Parallel()
+
+		// Create a mock chain and hook into GetPeerInfo.
+		c := newMockChain(t, params)
+		c.getPeerInfoHook = func(ctx context.Context) ([]chainjson.GetPeerInfoResult, error) {
+			return make([]chainjson.GetPeerInfoResult, tc.peerCount),
+				tc.err
+		}
+
+		// Initialize server.
+		db, err := memdb.NewMemDB()
+		require.NoError(t, err)
+		cfg := &ServerConfig{
+			ChainParams: params,
+			DBType:      dbTypePreconfigured,
+			db:          db,
+			c:           c,
+		}
+		svr := newTestServer(t, cfg)
+
+		ctx, cancel := context.WithTimeout(context.Background(), tc.ctxTimeout)
+		defer cancel()
+
+		gotErr := svr.waitForPeers(ctx, tc.timeout)
+		if !errors.Is(gotErr, tc.wantErr) {
+			t.Fatalf("unexpected error. want=%v got=%v", tc.wantErr,
+				gotErr)
+		}
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) { test(t, &tc) })
+	}
+}
+
 // TestWaitsForBlockchainSync asserts that the function that waits for
 // blockchain sync behaves correctly.
 func TestWaitsForBlockchainSync(t *testing.T) {
@@ -189,10 +271,11 @@ func TestWaitsForBlockchainSync(t *testing.T) {
 	simnet := chaincfg.SimNetParams()
 
 	type testCase struct {
-		name       string
-		net        *chaincfg.Params
-		resp       *chainjson.GetBlockChainInfoResult
-		wantSynced bool
+		name             string
+		net              *chaincfg.Params
+		resp             *chainjson.GetBlockChainInfoResult
+		wantSynced       bool
+		preprocessBlocks int
 	}
 
 	testCases := []testCase{{
@@ -203,7 +286,7 @@ func TestWaitsForBlockchainSync(t *testing.T) {
 			InitialBlockDownload: true,
 			Blocks:               0,
 		},
-		wantSynced: false,
+		wantSynced: true,
 	}, {
 		name: "empty simnet node returns anyway",
 		net:  simnet,
@@ -258,6 +341,26 @@ func TestWaitsForBlockchainSync(t *testing.T) {
 			Blocks:               1001,
 		},
 		wantSynced: true,
+	}, {
+		name:             "mainnet node with old db connected to unsynced node",
+		net:              mainnet,
+		preprocessBlocks: 3,
+		resp: &chainjson.GetBlockChainInfoResult{
+			SyncHeight:           2,
+			InitialBlockDownload: false,
+			Blocks:               2,
+		},
+		wantSynced: false,
+	}, {
+		name:             "mainnet node with old db connected to synced node",
+		net:              mainnet,
+		preprocessBlocks: 3,
+		resp: &chainjson.GetBlockChainInfoResult{
+			SyncHeight:           3,
+			InitialBlockDownload: false,
+			Blocks:               3,
+		},
+		wantSynced: true,
 	}}
 
 	// test executes a specific test case.
@@ -266,19 +369,30 @@ func TestWaitsForBlockchainSync(t *testing.T) {
 
 		// Initialize server.
 		c := newMockChain(t, tc.net)
+		db, err := memdb.NewMemDB()
+		require.NoError(t, err)
 		cfg := &ServerConfig{
 			ChainParams: tc.net,
 			DBType:      dbTypePreconfigured,
+			db:          db,
 			c:           c,
 		}
+		svr := newTestServer(t, cfg)
 
-		// we se a context that times out after 3 seconds. if the
+		// If we're simulating an existing server restarting, generate
+		// a chain and have the server preprocess it.
+		for i := 0; i < tc.preprocessBlocks; i++ {
+			c.extendTip()
+		}
+		err = svr.preProcessAccounts(testCtx(t))
+		require.NoError(t, err)
+
+		// We use a context that times out after 3 seconds. If the
 		// timeout for the context is triggered, this means
-		// waitforblockchainsync did not return due to the
-		// getblockchaininfo call.
+		// waitForBlockchainSync did not return due to the
+		// getBlockChainInfo call.
 		ctxt, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		t.Cleanup(cancel)
-		svr := newTestServer(t, cfg)
 
 		// Keep track of how many times the hook was called to assert
 		// it actually was called. Needs to be atomic due to being
@@ -351,9 +465,12 @@ func TestWaitsForBlockchainSyncWrongNet(t *testing.T) {
 	c := newMockChain(t, mainnet)
 	c.extendTip()
 
+	db, err := memdb.NewMemDB()
+	require.NoError(t, err)
 	cfg := &ServerConfig{
 		ChainParams: mainnet,
 		DBType:      dbTypePreconfigured,
+		db:          db,
 		c:           c,
 	}
 	svr := newTestServer(t, cfg)

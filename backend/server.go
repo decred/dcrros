@@ -88,8 +88,9 @@ type ServerConfig struct {
 
 	// The following fields are only defined during tests.
 
-	c  chain
-	db backenddb.DB
+	c           chain
+	db          backenddb.DB
+	peerTimeout time.Duration
 }
 
 // Server offers Decred blocks and services while following the Rosetta specs.
@@ -105,6 +106,7 @@ type Server struct {
 	network     *rtypes.NetworkIdentifier
 	db          backenddb.DB
 	dbType      DBType
+	peerTimeout time.Duration
 
 	// concurrency is used to define how many goroutines are executed under
 	// certain situations.
@@ -178,6 +180,7 @@ func NewServer(cfg *ServerConfig) (*Server, error) {
 		concurrency:    runtime.NumCPU(),
 		bcl:            &blocksConnectedLogger{lastTime: time.Now()},
 		dcrdActiveErr:  errDcrdUnconnected,
+		peerTimeout:    cfg.peerTimeout,
 	}
 
 	// Initialize connection to underlying dcrd node if an existing chain
@@ -350,6 +353,20 @@ func (s *Server) Run(ctx context.Context) error {
 	}()
 
 	// Wait until the dcrd and dcrros nodes are ready to function.
+	if err := s.waitForDcrdConnection(ctx); err != nil {
+		return err
+	}
+	peerTimeout := 10 * time.Second
+	if s.peerTimeout != 0 {
+		peerTimeout = s.peerTimeout
+	}
+	if err := s.waitForPeers(ctx, peerTimeout); err != nil {
+		// Skip errNoPeersAfterTimeout since it means no peers were
+		// found (we're probably an offline node).
+		if !errors.Is(err, errNoPeersAfterTimeout) {
+			return err
+		}
+	}
 	if err := s.waitForBlockchainSync(ctx); err != nil {
 		return err
 	}

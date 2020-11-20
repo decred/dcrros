@@ -149,12 +149,66 @@ func isErrNoTxInfo(err error) bool {
 	return false
 }
 
+// waitForDcrdConnection waits until the server is connected to an underlying
+// dcrd node.
+func (s *Server) waitForDcrdConnection(ctx context.Context) error {
+	svrLog.Debugf("Waiting for an active dcrd connection")
+	for {
+		if err := s.isDcrdActive(); err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+var errNoPeersAfterTimeout = errors.New("no peers after timeout")
+
+// waitForPeers waits until the underlying blockchain has peers to fetch blocks
+// from or the given timeout expires.
+//
+// Note that this returns errNoPeersAfterTimeout if the timeout elapses without
+// any peers being found.
+func (s *Server) waitForPeers(ctx context.Context, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+
+	svrLog.Infof("Waiting for dcrd to have peers until %s",
+		deadline.Format("2006-01-02 15:04:05"))
+	for {
+		if time.Now().After(deadline) {
+			return errNoPeersAfterTimeout
+		}
+
+		peers, err := s.c.GetPeerInfo(ctx)
+		if err != nil {
+			return err
+		}
+
+		if len(peers) > 0 {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
 // waitForBlockchainSync blocks until the underlying dcrd node is synced to the
 // best known chain.
 func (s *Server) waitForBlockchainSync(ctx context.Context) error {
 	var lastLogTime time.Time
 
-	isSimnet := s.chainParams.Name == "simnet"
+	_, bestHeight, err := s.lastProcessedBlock(ctx)
+	if err != nil {
+		return err
+	}
+	svrLog.Infof("Waiting for blockchain sync to at least height %d", bestHeight)
 
 	for {
 		info, err := s.c.GetBlockChainInfo(ctx)
@@ -190,7 +244,8 @@ func (s *Server) waitForBlockchainSync(ctx context.Context) error {
 
 		syncComplete := info.SyncHeight > 0 &&
 			!info.InitialBlockDownload &&
-			info.SyncHeight <= info.Blocks
+			info.SyncHeight <= info.Blocks &&
+			info.Blocks >= bestHeight
 		if syncComplete {
 			svrLog.Infof("Blockchain sync complete at height %d",
 				info.Blocks)
@@ -198,8 +253,11 @@ func (s *Server) waitForBlockchainSync(ctx context.Context) error {
 		}
 
 		if time.Since(lastLogTime) > time.Minute {
-			svrLog.Infof("Waiting blockchain sync (IBD=%v progress %.2f%%)",
-				info.InitialBlockDownload, info.VerificationProgress*100)
+			svrLog.Infof("Waiting blockchain sync (IBD=%v Headers=%d "+
+				"Blocks=%d Target=%d Progress=%.2f%%)",
+				info.InitialBlockDownload, info.Headers,
+				info.Blocks, info.SyncHeight,
+				info.VerificationProgress*100)
 			lastLogTime = time.Now()
 		}
 
@@ -209,20 +267,13 @@ func (s *Server) waitForBlockchainSync(ctx context.Context) error {
 		case <-time.After(time.Second):
 		}
 
-		// Special case for simnet: if syncHeight is still zero after
-		// the first wait, we'll allow the server to start anyway. This
-		// allows using the server even when the blockchain is empty
-		// and there are no peers to sync to, which is the case on a
-		// newly created, isolated (i.e. single peer) simnet.
-		//
-		// To test having this dcrros instance perform a sync on a
-		// large simnet network and an empty dcrd instance, use
-		// --dcrdrun=dcrd --dcrdextraarg="--connect
-		// [other-simnet-node]" so that it automatically connnects to
-		// the [other-simnet-node], establishing a syncHeight > 0
-		// immediately.
-		if info.SyncHeight == 0 && isSimnet {
-			svrLog.Infof("Ignoring SyncHeight == 0 on simnet")
+		// If syncHeight is still zero after the first wait, we'll
+		// allow the server to start anyway. This allows using the
+		// server even when the blockchain is empty and there are no
+		// peers to sync to, which is the case on a newly created,
+		// isolated (i.e. single peer) simnet or on offline nodes.
+		if info.SyncHeight == 0 {
+			svrLog.Infof("Terminating chain sync wait early due to SyncHeight == 0")
 			return nil
 		}
 	}

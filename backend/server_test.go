@@ -91,6 +91,7 @@ func TestServerProcessesNotifications(t *testing.T) {
 		DBType:      dbTypePreconfigured,
 		db:          db,
 		c:           c,
+		peerTimeout: -1,
 	}
 	ctxt, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -231,10 +232,16 @@ func TestRunsAllDBTypes(t *testing.T) {
 				DBType:      dbtype,
 				DBDir:       tmpDir,
 				c:           c,
+				peerTimeout: time.Millisecond,
 			}
 			ctxt, cancel := context.WithCancel(context.Background())
 			svr, err := NewServer(cfg)
 			require.NoError(t, err)
+
+			// Force the server to be connected.
+			svr.mtx.Lock()
+			svr.dcrdActiveErr = nil
+			svr.mtx.Unlock()
 
 			// runDone will receive the result of the Run() call.
 			runDone := make(chan error)
@@ -253,6 +260,16 @@ func TestRunsAllDBTypes(t *testing.T) {
 			if gotSS != emptySyncStatus {
 				t.Fatalf("unexpected sync status. want=%v, got=%v",
 					rtypes.SyncStatus{}, gotSS)
+			}
+
+			// Server tip should be the current chain tip.
+			hash, height, err := svr.lastProcessedBlock(ctxt)
+			require.NoError(t, err)
+			if height != c.tipHeight {
+				t.Fatalf("unexpected tip height. want=%d got=%d", c.tipHeight, height)
+			}
+			if *hash != c.tipHash {
+				t.Fatalf("unexpected tip hash. want=%s got=%s", c.tipHash, hash)
 			}
 
 			// Cancel the Run() call.
