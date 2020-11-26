@@ -61,6 +61,7 @@ const (
 	ErrChainUnavailable
 	ErrPrevOutTxNotFound
 	ErrPrevOutIndexNotFound
+	ErrNilAccount
 
 	// This MUST be the last member.
 	nbErrorCodes
@@ -102,6 +103,7 @@ var errorCodeMsgs = map[ErrorCode]string{
 	ErrChainUnavailable:          "chain unavailable",
 	ErrPrevOutTxNotFound:         "previous output tx not found",
 	ErrPrevOutIndexNotFound:      "previous output tx index not found",
+	ErrNilAccount:                "account cannot be nil",
 }
 
 // Error returns the default error message for the given error code.

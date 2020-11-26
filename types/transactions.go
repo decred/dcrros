@@ -31,25 +31,32 @@ func (e errKeyNotFound) Error() string {
 	return fmt.Sprintf("key %s does not exist", string(e))
 }
 
+var (
+	errIncorrectOutPointFormat = errors.New("string does not have outpoint format '<hex>:<index>''")
+	errShortOutPointHex        = errors.New("hex part of outpoint does not encode 32 bytes")
+	errInvalidOutPointHex      = errors.New("invalid hash at start of outpoint string")
+	errInvalidOutPointInt      = errors.New("invalid int at end of outpoint string")
+)
+
 // decodeOutPoint deserializes the given string into an outpoint.
 func decodeOutPoint(s string) (wire.OutPoint, error) {
 	split := strings.Split(s, ":")
 	var out wire.OutPoint
 	if len(split) != 2 {
-		return out, fmt.Errorf("string does not have outpoint format '<hex>:<index>''")
+		return out, errIncorrectOutPointFormat
 	}
 
 	if len(split[0]) != 64 {
-		return out, fmt.Errorf("hex part of outpoint does not encode 32 bytes")
+		return out, errShortOutPointHex
 	}
 
 	if err := chainhash.Decode(&out.Hash, split[0]); err != nil {
-		return out, fmt.Errorf("invalid hash at start of outpoint string")
+		return out, errInvalidOutPointHex
 	}
 
 	idx, err := strconv.ParseUint(split[1], 10, 32)
 	if err != nil {
-		return out, fmt.Errorf("invalid int at end of outpoint string")
+		return out, errInvalidOutPointInt
 	}
 
 	out.Index = uint32(idx)
@@ -57,17 +64,22 @@ func decodeOutPoint(s string) (wire.OutPoint, error) {
 	return out, nil
 }
 
+var (
+	errNilCoinChange   = errors.New("coin_change must not be nil")
+	errNilCoinChangeId = errors.New("coin_change.coin_identifier must not be nil")
+)
+
 // coinChangeToOutPoint decodes the given coin change into a wire OutPoint.
 func coinChangeToOutPoint(cc *rtypes.CoinChange) (wire.OutPoint, error) {
 	if cc == nil {
-		return wire.OutPoint{}, fmt.Errorf("coin_change must not be nil")
+		return wire.OutPoint{}, errNilCoinChange
 	}
 	if cc.CoinIdentifier == nil {
-		return wire.OutPoint{}, fmt.Errorf("coin_change.coin_identifier must not be nil")
+		return wire.OutPoint{}, errNilCoinChangeId
 	}
 	outp, err := decodeOutPoint(cc.CoinIdentifier.Identifier)
 	if err != nil {
-		return outp, fmt.Errorf("unable to decode outpoint: %v", err)
+		return outp, err
 	}
 	return outp, nil
 }
@@ -165,12 +177,16 @@ func metadataHex(m map[string]interface{}, k string, b *[]byte) error {
 	return nil
 }
 
+var (
+	errWrongDebitCoinAction = errors.New("debit operation needs a coin_spent coin_action")
+)
+
 func rosettaOpToTx(op *rtypes.Operation, tx *wire.MsgTx, chainParams *chaincfg.Params) error {
 	m := op.Metadata
 
 	opAmt, err := RosettaToDcrAmount(op.Amount)
 	if err != nil {
-		return fmt.Errorf("unable to decode op value: %v", err)
+		return err
 	}
 
 	switch OpType(op.Type) {
@@ -184,10 +200,10 @@ func rosettaOpToTx(op *rtypes.Operation, tx *wire.MsgTx, chainParams *chaincfg.P
 		// PrevousOutPoint.
 		prevOut, err := coinChangeToOutPoint(op.CoinChange)
 		if err != nil {
-			return fmt.Errorf("invalid coin_change in debit op: %v", err)
+			return fmt.Errorf("invalid coin_change in debit op: %w", err)
 		}
 		if op.CoinChange.CoinAction != rtypes.CoinSpent {
-			return fmt.Errorf("debit operation needs a coin_spent coin_action")
+			return errWrongDebitCoinAction
 		}
 
 		// Ignore if prev_tree is not found (defaults to regular tree).
@@ -216,7 +232,7 @@ func rosettaOpToTx(op *rtypes.Operation, tx *wire.MsgTx, chainParams *chaincfg.P
 		}
 
 		if op.Account == nil {
-			return fmt.Errorf("nil account")
+			return ErrNilAccount
 		}
 
 		var err error
@@ -238,7 +254,7 @@ func rosettaOpToTx(op *rtypes.Operation, tx *wire.MsgTx, chainParams *chaincfg.P
 // into a Decred transaction. The transaction may be signed or unsigned
 // depending on the content of the operations.
 func RosettaOpsToTx(txMeta map[string]interface{}, ops []*rtypes.Operation, chainParams *chaincfg.Params) (*wire.MsgTx, error) {
-	tx := &wire.MsgTx{}
+	tx := wire.NewMsgTx()
 
 	// We ignore errKeyNotFound in the next ones so that the tx defaults to the
 	// standard ones.

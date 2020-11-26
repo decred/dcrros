@@ -263,7 +263,6 @@ func rosToTxTestCases() *rosToTxTestContext {
 // TestRosettaOpsToTx tests that converting a slice of Rosetta ops to a Decred
 // transaction works as expected.
 func TestRosettaOpsToTx(t *testing.T) {
-
 	chainParams := chaincfg.RegNetParams()
 	tctx := rosToTxTestCases()
 
@@ -309,6 +308,105 @@ func TestRosettaOpsToTx(t *testing.T) {
 			tc.assertMatchesOut(t, opIdx, tx.TxOut[outIdx])
 			outIdx++
 		}
+	}
+}
+
+// TestRosettaOpsToTxEdges tests edge cases of conversion from Rosetta ops to a
+// transaction.
+func TestRosettaOpsToTxEdges(t *testing.T) {
+	chainParams := chaincfg.RegNetParams()
+
+	dummyAccount := &rtypes.AccountIdentifier{
+		Address: "RsPSidp9af5pbGBBQYb3VcRLGzHaPma1Xpv",
+		Metadata: map[string]interface{}{
+			"script_version": uint16(0),
+		},
+	}
+
+	// Tests involving tx metadata (requires calling the exported
+	// RosettaOpsToTx).
+	t.Run("empty tx meta", func(t *testing.T) {
+		txMeta := map[string]interface{}{}
+		tx, err := RosettaOpsToTx(txMeta, []*rtypes.Operation{}, chainParams)
+		require.NoError(t, err)
+		require.Equal(t, uint16(1), tx.Version)
+		require.Equal(t, uint32(0), tx.Expiry)
+		require.Equal(t, uint32(0), tx.LockTime)
+	})
+
+	t.Run("filled tx meta", func(t *testing.T) {
+		txMeta := map[string]interface{}{
+			"version":  uint16(10),
+			"expiry":   uint32(20),
+			"locktime": uint32(30),
+		}
+
+		tx, err := RosettaOpsToTx(txMeta, []*rtypes.Operation{}, chainParams)
+		require.NoError(t, err)
+		require.Equal(t, uint16(10), tx.Version)
+		require.Equal(t, uint32(20), tx.Expiry)
+		require.Equal(t, uint32(30), tx.LockTime)
+	})
+
+	// Tests for individual op errors (uses the unexported rosettaOpToTx).
+	testCases := []struct {
+		name    string
+		op      *rtypes.Operation
+		wantErr error
+	}{{
+		name: "unknown op type",
+		op: &rtypes.Operation{
+			Amount: DcrAmountToRosetta(1),
+			Type:   "*unknown",
+		},
+		wantErr: ErrUnkownOpType,
+	}, {
+		name: "op without amount",
+		op: &rtypes.Operation{
+			Type: "debit",
+		},
+		wantErr: errNilAmount,
+	}, {
+		name: "debit without coin change",
+		op: &rtypes.Operation{
+			Type:    "debit",
+			Amount:  DcrAmountToRosetta(1),
+			Account: dummyAccount,
+		},
+		wantErr: errNilCoinChange,
+	}, {
+		name: "debit with wrong coin action",
+		op: &rtypes.Operation{
+			Type:    "debit",
+			Amount:  DcrAmountToRosetta(1),
+			Account: dummyAccount,
+			CoinChange: &rtypes.CoinChange{
+				CoinAction: rtypes.CoinCreated,
+				CoinIdentifier: &rtypes.CoinIdentifier{
+					Identifier: wire.OutPoint{}.String(),
+				},
+			},
+		},
+		wantErr: errWrongDebitCoinAction,
+	}, {
+		name: "credit without account",
+		op: &rtypes.Operation{
+			Type:   "credit",
+			Amount: DcrAmountToRosetta(1),
+		},
+		wantErr: ErrNilAccount,
+	}}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			tx := wire.NewMsgTx()
+			gotErr := rosettaOpToTx(tc.op, tx, chainParams)
+			if !errors.Is(gotErr, tc.wantErr) {
+				t.Fatalf("unexpected error. want=%v, got=%v",
+					tc.wantErr, gotErr)
+			}
+		})
 	}
 }
 

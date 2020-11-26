@@ -6,6 +6,7 @@ package types
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -84,18 +85,23 @@ func dcrPkScriptToAccountAddr(version uint16, pkScript []byte, chainParams *chai
 	return saddr, nil
 }
 
+var (
+	errNilAccountMetadata        = errors.New("nil account metadata")
+	errCannotDecodeScriptVersion = errors.New("unable to decode script_version")
+)
+
 // rosettaAccountToPkScript converts the given Rosetta account and version
 // information into a PkScript.
 func rosettaAccountToPkScript(account *rtypes.AccountIdentifier,
 	chainParams *chaincfg.Params) (uint16, []byte, error) {
 
 	if account.Metadata == nil {
-		return 0, nil, fmt.Errorf("nil account metadata")
+		return 0, nil, errNilAccountMetadata
 	}
 
 	var version uint16
 	if err := metadataUint16(account.Metadata, "script_version", &version); err != nil {
-		return 0, nil, fmt.Errorf("unable to decode script_version: %v", err)
+		return 0, nil, fmt.Errorf("%w: %v", errCannotDecodeScriptVersion, err)
 	}
 
 	var pkscript []byte
