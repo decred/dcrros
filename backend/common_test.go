@@ -28,12 +28,18 @@ import (
 // defaultTimeout is the default timeout for test contexts.
 const defaultTimeout = time.Second * 30
 
+// timeoutCtx returns a context that gets canceled after the specified time or
+// after the test ends.
+func timeoutCtx(t *testing.T, timeout time.Duration) context.Context {
+	ctxt, cancel := context.WithTimeout(context.Background(), timeout)
+	t.Cleanup(cancel)
+	return ctxt
+}
+
 // testCtx returns a context that gets canceled after defaultTimeout or after
 // the test ends.
 func testCtx(t *testing.T) context.Context {
-	ctxt, cancel := context.WithTimeout(context.Background(), defaultTimeout)
-	t.Cleanup(cancel)
-	return ctxt
+	return timeoutCtx(t, defaultTimeout)
 }
 
 // testDbInstances executes the specified test on all available DB

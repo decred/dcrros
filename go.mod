@@ -5,6 +5,7 @@ go 1.14
 require (
 	github.com/coinbase/rosetta-sdk-go v0.5.0
 	github.com/davecgh/go-spew v1.1.1
+	github.com/decred/dcrd v1.2.1-0.20201027152758-03726a52228b
 	github.com/decred/dcrd/blockchain/stake/v3 v3.0.0
 	github.com/decred/dcrd/chaincfg/chainhash v1.0.2
 	github.com/decred/dcrd/chaincfg/v3 v3.0.0

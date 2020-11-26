@@ -7,21 +7,39 @@ jobs:
     strategy:
       matrix:
         go: [1.14, 1.15]
+    env:
+      GO111MODULE: "on"
     steps:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
           go-version: ${{ matrix.go }}
-      - name: Check out source
+
+      - name: Check out dcrros source
         uses: actions/checkout@v2
+        with:
+          path: dcrros
+
       - name: Install Linters
         run: "curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $(go env GOPATH)/bin v1.32.1"
+
       - name: Build
-        env:
-          GO111MODULE: "on"
+        working-directory: dcrros
         run: go build ./...
+
+      - name: Checkout dcrd # Needed for rpctests
+        uses: actions/checkout@v2
+        with:
+          repository: decred/dcrd
+          ref: release-v1.6.0-rc4
+          path: dcrd
+
+      - name: Install dcrd
+        working-directory: dcrd
+        run:
+          go install .
+
       - name: Test
-        env:
-          GO111MODULE: "on"
+        working-directory: dcrros
         run: |
           sh ./run_tests.sh
