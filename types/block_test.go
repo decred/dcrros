@@ -583,10 +583,10 @@ func assertTestCaseOpsMatch(t *testing.T, txi, opi int, status OpStatus,
 	}
 
 	// All operations should have the appropriate status.
-	if OpStatus(op.Status) != status {
+	if OpStatus(*op.Status) != status {
 		t.Fatalf("tx %d op %d: unexpected OpStatus. "+
 			"want=%s got=%s", txi, opi,
-			OpStatusSuccess, op.Status)
+			status, *op.Status)
 	}
 
 	// Verify key properties between test case and

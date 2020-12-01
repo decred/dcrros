@@ -294,5 +294,9 @@ func (s *Server) AccountBalance(ctx context.Context, req *rtypes.AccountBalanceR
 	}
 
 	return res, nil
+}
 
+// AccountCoins returns the coins (i.e. utxos) belonging to a given account.
+func (s *Server) AccountCoins(ctx context.Context, req *rtypes.AccountCoinsRequest) (*rtypes.AccountCoinsResponse, *rtypes.Error) {
+	return nil, types.ErrUnimplemented.RError()
 }

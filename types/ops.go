@@ -35,6 +35,18 @@ func AllOpTypes() []string {
 // OpStatus is a type convertible to rosetta's OperationStatus type.
 type OpStatus string
 
+// Status() return the status as a pointer to a string, which is useful in some
+// Rosetta calls.
+//
+// Note that an empty OpStatus results in a nil pointer.
+func (st OpStatus) Status() *string {
+	if st == "" {
+		return nil
+	}
+	s := string(st)
+	return &s
+}
+
 // RStatus converts the given opStatus to a rosetta OperationStatus.
 func (st OpStatus) RStatus() *rtypes.OperationStatus {
 	return &rtypes.OperationStatus{

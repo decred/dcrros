@@ -1,11 +1,11 @@
 # Decred/Rosetta middleware service
 
 [![ISC License](https://img.shields.io/badge/license-ISC-blue.svg)](http://copyfree.org)
-[![ISC License](https://img.shields.io/badge/rosetta-1.4.5-blue.svg)](https://rosetta-api.org)
+[![ISC License](https://img.shields.io/badge/rosetta-1.4.8-blue.svg)](https://rosetta-api.org)
 
 `dcrros` (Decred/Rosetta) is a middleware service that provides access to the [Decred](https://www.decred.org) network via a [Rosetta-compatible](https://rosetta-api.org) API.
 
-This version is currently compatible to Rosetta version **1.4.5**.
+This version is currently compatible to Rosetta version **1.4.8**.
 
 `dcrros` works as an API conversion layer and cache for the data required by Rosetta implementations. It requires a running `dcrd` node to use for authoritative blockchain data. For technical information about the mapping between Decred and Rosetta concepts, please see the [mapping](/docs/mapping.md) document.
 

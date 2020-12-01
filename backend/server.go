@@ -28,7 +28,7 @@ import (
 const (
 	// rosettaVersion is the version of the rosetta spec this backend
 	// currently implements.
-	rosettaVersion = "1.4.0"
+	rosettaVersion = "1.4.8"
 )
 
 // DBType defines the available database types.
@@ -139,8 +139,9 @@ func NewServer(cfg *ServerConfig) (*Server, error) {
 	allTypes := types.AllOpTypes()
 	histBalance := true
 	var callMethods []string
+	mempoolCoins := false
 	astr, err := asserter.NewServer(allTypes, histBalance,
-		[]*rtypes.NetworkIdentifier{network}, callMethods)
+		[]*rtypes.NetworkIdentifier{network}, callMethods, mempoolCoins)
 	if err != nil {
 		return nil, err
 	}

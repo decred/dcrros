@@ -122,7 +122,7 @@ func (op *Op) ROp() *rtypes.Operation {
 			Index: op.OpIndex,
 		},
 		Type:       op.Type.RType(),
-		Status:     string(op.Status),
+		Status:     op.Status.Status(),
 		Account:    account,
 		Amount:     DcrAmountToRosetta(op.Amount),
 		Metadata:   meta,

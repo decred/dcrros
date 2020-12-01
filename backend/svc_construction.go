@@ -481,7 +481,7 @@ func (s *Server) ConstructionParse(ctx context.Context,
 	// The returned operations on this endpoint must have an empty status,
 	// so clear them out here.
 	for _, op := range rtx.Operations {
-		op.Status = ""
+		op.Status = nil
 	}
 
 	return &rtypes.ConstructionParseResponse{
