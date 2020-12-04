@@ -14,6 +14,13 @@ import (
 	"github.com/decred/dcrd/wire"
 )
 
+// rollbackTip rolls back the current db tip and undoes all utxos added by it.
+func (s *Server) rollbackTip(dbtx backenddb.WriteTx, tipHash *chainhash.Hash,
+	tipHeight int64) error {
+
+	return s.db.RollbackTip(dbtx, *tipHash, tipHeight)
+}
+
 // rollbackDbChain rolls back the db chain until we find a common block between
 // the db and the blockchain, assuming the chain is at the specified target
 // hash and height.
@@ -43,7 +50,7 @@ func (s *Server) rollbackDbChain(dbtx backenddb.WriteTx,
 		var err error
 
 		svrLog.Debugf("Rolling back rewinded tip %d %s", tipHeight, tipHash)
-		if err = s.db.RollbackTip(dbtx, tipHash, tipHeight); err != nil {
+		if err = s.rollbackTip(dbtx, &tipHash, tipHeight); err != nil {
 			return nil, 0, nil, err
 		}
 		if tipHash, tipHeight, err = s.db.LastProcessedBlock(dbtx); err != nil {
@@ -80,7 +87,7 @@ func (s *Server) rollbackDbChain(dbtx backenddb.WriteTx,
 		svrLog.Debugf("Rolling back reorged tip %d %s", tipHeight, tipHash)
 
 		// Rollback the DB tip and find out the new tip.
-		if err = s.db.RollbackTip(dbtx, tipHash, tipHeight); err != nil {
+		if err = s.rollbackTip(dbtx, &tipHash, tipHeight); err != nil {
 			return nil, 0, nil, err
 		}
 		if tipHash, tipHeight, err = s.db.LastProcessedBlock(dbtx); err != nil {
@@ -244,7 +251,7 @@ func (s *Server) handleBlockDisconnected(ctx context.Context, header *wire.Block
 		}
 
 		// Rollback this block.
-		return s.db.RollbackTip(dbtx, tipHash, int64(header.Height))
+		return s.rollbackTip(dbtx, &tipHash, int64(header.Height))
 	})
 	if err != nil {
 		return err

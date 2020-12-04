@@ -76,8 +76,6 @@ func TestProcessSequentialBlocks(t *testing.T) {
 }
 
 func testHandlesBlockNotifications(t *testing.T, db backenddb.DB) {
-	t.Parallel()
-
 	params := chaincfg.RegNetParams()
 	c := newMockChain(t, params)
 
@@ -334,5 +332,5 @@ func testHandlesBlockNotifications(t *testing.T, db backenddb.DB) {
 // TestHandlesBlockNotifications ensures that block connected/disconnected
 // notifications from the underlying chain instance behave correctly.
 func TestHandlesBlockNotifications(t *testing.T) {
-	testDbInstances(t, false, testHandlesBlockNotifications)
+	testDbInstances(t, true, testHandlesBlockNotifications)
 }
