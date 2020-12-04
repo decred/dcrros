@@ -35,7 +35,7 @@ func updateUtxoSet(op *types.Op, utxoSet map[wire.OutPoint]*types.PrevInput) {
 	case typ == types.OpTypeCredit && st == types.OpStatusSuccess:
 		// Successful output adds entry to utxo set.
 		outp := wire.OutPoint{
-			Hash:  op.Tx.TxHash(),
+			Hash:  op.TxHash,
 			Index: uint32(op.IOIndex),
 			Tree:  op.Tree,
 		}
@@ -52,12 +52,11 @@ func updateUtxoSet(op *types.Op, utxoSet map[wire.OutPoint]*types.PrevInput) {
 	case typ == types.OpTypeCredit && st == types.OpStatusReversed:
 		// Reversed output removes entry from the utxo set.
 		outp := wire.OutPoint{
-			Hash:  op.Tx.TxHash(),
+			Hash:  op.TxHash,
 			Index: uint32(op.IOIndex),
 			Tree:  op.Tree,
 		}
 		delete(utxoSet, outp)
-
 	}
 }
 
