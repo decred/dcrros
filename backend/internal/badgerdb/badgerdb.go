@@ -13,6 +13,7 @@ import (
 	"decred.org/dcrros/backend/backenddb"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/wire"
 	"github.com/dgraph-io/badger/v2"
 )
 
@@ -170,6 +171,29 @@ func (db *BadgerDB) StoreBalances(wtx backenddb.WriteTx, blockHash chainhash.Has
 	}
 
 	return putLastProcessedAccountBlock(tx.tx, &blockHash, height)
+}
+
+func (db *BadgerDB) AddUtxo(wtx backenddb.WriteTx, account string, outpoint *wire.OutPoint, amt dcrutil.Amount) error {
+	if !wtx.Writable() {
+		return fmt.Errorf("unwritable tx")
+	}
+
+	tx := wtx.(*transaction)
+	return putAccountUtxo(tx.tx, account, outpoint, amt)
+}
+
+func (db *BadgerDB) DelUtxo(wtx backenddb.WriteTx, account string, outpoint *wire.OutPoint) error {
+	if !wtx.Writable() {
+		return fmt.Errorf("unwritable tx")
+	}
+
+	tx := wtx.(*transaction)
+	return delAccountUtxo(tx.tx, account, outpoint)
+}
+
+func (db *BadgerDB) ListUtxos(rtx backenddb.ReadTx, account string) (map[wire.OutPoint]dcrutil.Amount, error) {
+	tx := rtx.(*transaction)
+	return fetchAccountUtxos(tx.tx, account)
 }
 
 func (db *BadgerDB) View(ctx context.Context, f func(tx backenddb.ReadTx) error) error {

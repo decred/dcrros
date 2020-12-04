@@ -13,6 +13,7 @@ import (
 	"decred.org/dcrros/backend/backenddb"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/wire"
 )
 
 type balanceHeight struct {
@@ -25,6 +26,11 @@ type processedBlock struct {
 	accounts []string
 }
 
+type utxo struct {
+	outp wire.OutPoint
+	amt  dcrutil.Amount
+}
+
 type transaction struct {
 	ctx             context.Context
 	writable        bool
@@ -33,6 +39,8 @@ type transaction struct {
 	blockHash       chainhash.Hash
 	blockHeight     int64
 	processedBlocks map[int64]*processedBlock
+	utxos           map[string]map[wire.OutPoint]dcrutil.Amount
+	delUtxos        map[string]map[wire.OutPoint]struct{}
 }
 
 func (t *transaction) Context() context.Context {
@@ -53,6 +61,19 @@ type MemDB struct {
 	lastHeight      int64
 	processedBlocks map[int64]*processedBlock
 	mtx             sync.Mutex
+
+	// Tracking of utxos per account.
+	//
+	// We track utxos in three "buckets" (maps): one that maps an account
+	// to a single utxo (experimentally, > 90% of accounts fall within this
+	// case), one for "a few" utxos (~7% of accounts) and one for the long
+	// tail of other accounts.
+	//
+	// This design is used because it has been empirically determined to
+	// offer the best tradeoff between memory and cpu usage.
+	singleUtxos map[string]*utxo
+	fewUtxos    map[string][]*utxo
+	utxos       map[string]map[wire.OutPoint]dcrutil.Amount
 }
 
 // NewMemDB returns a new instance of a MemDB.
@@ -60,6 +81,9 @@ func NewMemDB() (*MemDB, error) {
 	return &MemDB{
 		balances:        make(map[string][]balanceHeight),
 		processedBlocks: make(map[int64]*processedBlock),
+		singleUtxos:     make(map[string]*utxo),
+		fewUtxos:        make(map[string][]*utxo),
+		utxos:           make(map[string]map[wire.OutPoint]dcrutil.Amount),
 	}, nil
 }
 
@@ -220,6 +244,91 @@ func (db *MemDB) RollbackTip(wtx backenddb.WriteTx, blockHash chainhash.Hash, he
 	return nil
 }
 
+// AddUtxo adds the specified utxo to the db.
+func (db *MemDB) AddUtxo(wtx backenddb.WriteTx, account string,
+	outpoint *wire.OutPoint, amount dcrutil.Amount) error {
+
+	if !wtx.Writable() {
+		return fmt.Errorf("unwritable tx")
+	}
+	tx := wtx.(*transaction)
+
+	// Add this new utxo to the tx.
+	acctUtxos := tx.utxos[account]
+	if acctUtxos == nil {
+		acctUtxos = make(map[wire.OutPoint]dcrutil.Amount, 1)
+		tx.utxos[account] = acctUtxos
+	}
+	acctUtxos[*outpoint] = amount
+
+	// If the utxo was previously scheduled to be deleted, cancel its
+	// deletion.
+	delAcctUtxos := tx.delUtxos[account]
+	delete(delAcctUtxos, *outpoint)
+
+	return nil
+}
+
+// DelUtxo removes the given utxo from the db.
+func (db *MemDB) DelUtxo(wtx backenddb.WriteTx, account string,
+	outpoint *wire.OutPoint) error {
+
+	if !wtx.Writable() {
+		return fmt.Errorf("unwritable tx")
+	}
+	tx := wtx.(*transaction)
+
+	// If the utxo was added to the tx, remove it.
+	acctUtxos := tx.utxos[account]
+	delete(acctUtxos, *outpoint)
+
+	// Schedule this outpoint for removal from the db when the tx is
+	// committed.
+	delAcctUtxos := tx.delUtxos[account]
+	if delAcctUtxos == nil {
+		delAcctUtxos = make(map[wire.OutPoint]struct{})
+		tx.delUtxos[account] = delAcctUtxos
+	}
+	delAcctUtxos[*outpoint] = struct{}{}
+
+	return nil
+}
+
+// ListUtxos lists the utxos in the database for a given account.
+func (db *MemDB) ListUtxos(rtx backenddb.ReadTx, account string) (map[wire.OutPoint]dcrutil.Amount, error) {
+	tx := rtx.(*transaction)
+	res := make(map[wire.OutPoint]dcrutil.Amount)
+
+	// First check utxos that exist in the db. Since we store utxos in
+	// three different maps, we need to check each one.
+	if utxo, ok := db.singleUtxos[account]; ok {
+		res[utxo.outp] = utxo.amt
+	}
+	if utxos, ok := db.fewUtxos[account]; ok {
+		for _, utxo := range utxos {
+			res[utxo.outp] = utxo.amt
+		}
+	}
+	if utxos, ok := db.utxos[account]; ok {
+		for outp, amt := range utxos {
+			res[outp] = amt
+		}
+	}
+
+	// Next, add utxos from the tx itself.
+	for outp, amt := range tx.utxos[account] {
+		res[outp] = amt
+	}
+
+	// Finally, if there are any utxos scheduled for removal in the current
+	// tx, remove them from the resulting map.
+	for outp := range tx.delUtxos[account] {
+		delete(res, outp)
+	}
+
+	return res, nil
+}
+
 func (db *MemDB) View(ctx context.Context, f func(tx backenddb.ReadTx) error) error {
 	t := &transaction{ctx: ctx}
 	db.mtx.Lock()
@@ -233,6 +342,8 @@ func (db *MemDB) Update(ctx context.Context, f func(tx backenddb.WriteTx) error)
 		writable:        true,
 		balances:        make(map[string][]balanceHeight),
 		processedBlocks: make(map[int64]*processedBlock),
+		utxos:           make(map[string]map[wire.OutPoint]dcrutil.Amount),
+		delUtxos:        make(map[string]map[wire.OutPoint]struct{}),
 	}
 	db.mtx.Lock()
 	defer db.mtx.Unlock()
@@ -256,6 +367,112 @@ func (db *MemDB) Update(ctx context.Context, f func(tx backenddb.WriteTx) error)
 	if tx.updatedBlock {
 		db.lastBlockHash = tx.blockHash
 		db.lastHeight = tx.blockHeight
+	}
+
+	// fewUtxoLimit is the limit for entries in the "fewUtxos" bucket. This
+	// is chosen as a compromise between instantiaing a map that may
+	// potentially hold a small number of utxos versus the added cpu time
+	// to add and delete elements from the slice version.
+	fewUtxoLimit := 12
+
+	// Update the account utxos index.
+	for acct, utxos := range tx.utxos {
+		// Fetch the current utxos for the specified account.
+		acctUtxos := db.utxos[acct]
+		firstUtxo := db.singleUtxos[acct]
+		lenFirstUtxo := 0
+		if firstUtxo != nil {
+			lenFirstUtxo++
+		}
+		fewUtxos := db.fewUtxos[acct]
+
+		// First case: adding a single utxo to a previously unseen
+		// account, record it in the singleUtxos map.
+		if acctUtxos == nil && fewUtxos == nil && firstUtxo == nil && len(utxos) == 1 {
+			for outp, amt := range utxos {
+				db.singleUtxos[acct] = &utxo{outp: outp, amt: amt}
+			}
+			continue
+		}
+
+		// Second case, if the total nb of utxos is less than
+		// fewUtxoLimit, store in the fewUtxos map.
+		if acctUtxos == nil && len(utxos)+len(fewUtxos)+lenFirstUtxo < fewUtxoLimit {
+			if fewUtxos == nil {
+				// Initialize the array for the first time.
+				fewUtxos = make([]*utxo, 0, len(utxos)+lenFirstUtxo)
+			}
+			if firstUtxo != nil {
+				// Add the first utxo as needed.
+				fewUtxos = append(fewUtxos, firstUtxo)
+				delete(db.singleUtxos, acct)
+			}
+			// Add the new utxos.
+			for outp, amt := range utxos {
+				fewUtxos = append(fewUtxos, &utxo{outp: outp, amt: amt})
+			}
+			db.fewUtxos[acct] = fewUtxos
+			continue
+		}
+
+		// Handle the long tail of accounts with multiple utxos.
+
+		if acctUtxos == nil {
+			// Initialize the array for the first time.
+			szHint := len(utxos) + len(fewUtxos) + lenFirstUtxo
+			acctUtxos = make(map[wire.OutPoint]dcrutil.Amount, szHint)
+			db.utxos[acct] = acctUtxos
+		}
+		if firstUtxo != nil {
+			// Add the first utxo if defined.
+			acctUtxos[firstUtxo.outp] = firstUtxo.amt
+			delete(db.singleUtxos, acct)
+		}
+		if fewUtxos != nil {
+			// Add all the first few utxos if defined.
+			for _, utxo := range fewUtxos {
+				acctUtxos[utxo.outp] = utxo.amt
+			}
+			delete(db.fewUtxos, acct)
+		}
+
+		// Add all remaining utxos.
+		for outp, amt := range utxos {
+			acctUtxos[outp] = amt
+		}
+	}
+
+	// Remove all utxos.
+	for acct, delUtxos := range tx.delUtxos {
+		firstUtxo := db.singleUtxos[acct]
+		fewUtxos := db.fewUtxos[acct]
+		acctUtxos := db.utxos[acct]
+		for outp := range delUtxos {
+			// Safe to always remove from the long tail utxo map.
+			delete(acctUtxos, outp)
+
+			// The firstUtxo is either the one we want to delete or
+			// not.
+			if firstUtxo != nil && firstUtxo.outp == outp {
+				delete(db.singleUtxos, acct)
+			}
+
+			// The fewUtxos are a simple slice, so we need to
+			// remove it by iterating, finding the appropriate
+			// entry, then re-slicing.
+			for i := 0; i < len(fewUtxos); {
+				if fewUtxos[i].outp == outp {
+					l := len(fewUtxos)
+					fewUtxos[i] = fewUtxos[l-1]
+					fewUtxos[l-1] = nil
+					fewUtxos = fewUtxos[:l-1]
+					db.fewUtxos[acct] = fewUtxos
+					break
+				} else {
+					i++
+				}
+			}
+		}
 	}
 
 	return nil

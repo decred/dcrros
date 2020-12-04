@@ -11,6 +11,7 @@ import (
 
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/wire"
 	"github.com/dgraph-io/badger/v2"
 )
 
@@ -37,6 +38,16 @@ const (
 	// blockAccountsChangedPrefix is the prefix of keys that store accounts
 	// processed at a given height.
 	blockAccountsChangedPrefix = "bac/"
+
+	// accountUtxosKeyPrefix is the prefix of keys that store the index of
+	// account utxos.
+	//
+	// Full keys have the format:
+	//
+	//        autxos/[account]/[32-byte hash][4-byte index][1-byte tree]
+	//
+	// Value is the amount for the given account/utxo.
+	accountUtxosKeyPrefix = "autxos/"
 )
 
 func accountBalanceAtHeightKey(account string, height int64) []byte {
@@ -187,4 +198,78 @@ func fetchBlockAccounts(dbtx *badger.Txn, height int64) ([]string, error) {
 	}
 
 	return accounts, nil
+}
+
+// accountUtxoKey returns the key for a specific utxo or the prefix to all
+// account's utxo if outpoint is nil.
+func accountUtxoKey(account string, outpoint *wire.OutPoint) []byte {
+	keylen := len(accountUtxosKeyPrefix) + len(account) + 1
+	if outpoint != nil {
+		keylen += 32 + 4 + 1
+	}
+	key := make([]byte, keylen)
+	k := key[copy(key, accountUtxosKeyPrefix):]
+	k = k[copy(k, []byte(account)):]
+	k[0] = '/'
+
+	if outpoint != nil {
+		k = k[1:]
+		copy(k[:32], outpoint.Hash[:])
+		binary.BigEndian.PutUint32(k[32:36], outpoint.Index)
+		k[36] = byte(outpoint.Tree)
+	}
+
+	return key
+}
+
+// extractAccountUtxoKeyOutpoint returns the outpoint stored in a given account
+// utxo key. The key MUST be valid, otherwise this panics.
+func extractAccountUtxoKeyOutpoint(key []byte) wire.OutPoint {
+	// The outpoint is stored in the last 36 bytes of the key.
+	b := key[len(key)-36-1:]
+	var res wire.OutPoint
+	copy(res.Hash[:], b[:32])
+	res.Index = binary.BigEndian.Uint32(b[32:36])
+	res.Tree = int8(b[36])
+	return res
+}
+
+func putAccountUtxo(dbtx *badger.Txn, account string, outpoint *wire.OutPoint,
+	amount dcrutil.Amount) error {
+
+	if outpoint == nil {
+		return fmt.Errorf("outpoint's utxo cannot be nil")
+	}
+
+	var v [8]byte
+	binary.BigEndian.PutUint64(v[:], uint64(amount))
+	return dbtx.Set(accountUtxoKey(account, outpoint), v[:])
+}
+
+func delAccountUtxo(dbtx *badger.Txn, account string, outpoint *wire.OutPoint) error {
+	return dbtx.Delete(accountUtxoKey(account, outpoint))
+}
+
+func fetchAccountUtxos(dbtx *badger.Txn, account string) (map[wire.OutPoint]dcrutil.Amount, error) {
+	keyPrefix := accountUtxoKey(account, nil)
+	utxos := make(map[wire.OutPoint]dcrutil.Amount)
+	itOpts := badger.DefaultIteratorOptions
+	itOpts.PrefetchValues = true
+	itOpts.Prefix = keyPrefix
+	it := dbtx.NewIterator(itOpts)
+	defer it.Close()
+	for it.Rewind(); it.ValidForPrefix(keyPrefix); it.Next() {
+		item := it.Item()
+		outp := extractAccountUtxoKeyOutpoint(item.Key())
+		err := item.Value(func(v []byte) error {
+			amt := binary.BigEndian.Uint64(v)
+			utxos[outp] = dcrutil.Amount(amt)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return utxos, nil
 }

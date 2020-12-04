@@ -10,6 +10,7 @@ import (
 
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/wire"
 )
 
 var (
@@ -83,6 +84,17 @@ type DB interface {
 	// If the passed height does not extend the current chain tip,
 	// ErrNotExtendingTip is returned.
 	StoreBalances(tx WriteTx, blockHash chainhash.Hash, height int64, balances map[string]dcrutil.Amount) error
+
+	// AddUtxo associates the given oupoint and amount as an unspent output
+	// for the given account.
+	AddUtxo(wtx WriteTx, account string, outpoint *wire.OutPoint, amt dcrutil.Amount) error
+
+	// DelUtxo removes the given outpoint as an unspent output of the given
+	// account.
+	DelUtxo(wtx WriteTx, account string, outpoint *wire.OutPoint) error
+
+	// ListUtxos lists all unspent outputs of the given account.
+	ListUtxos(rtx ReadTx, account string) (map[wire.OutPoint]dcrutil.Amount, error)
 
 	// View starts a read-only db transaction and executes the given
 	// function within its context.

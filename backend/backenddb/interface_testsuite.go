@@ -7,12 +7,14 @@ package backenddb
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"testing"
 	"time"
 
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/wire"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,6 +41,7 @@ func TestCases() []TestCase {
 		{Name: "processed block hash", Run: testProcessedBlockHash},
 		{Name: "rollback tip", Run: testRollbackTip},
 		{Name: "multiple rollback", Run: testMultipleRollback},
+		{Name: "account utxos", Run: testAccountUtxos},
 	}
 }
 
@@ -274,6 +277,16 @@ func testProcessedBlockHash(t *testing.T, db DB) {
 	})
 	require.NoError(t, err)
 
+	err = db.Update(testCtx(t), func(wtx WriteTx) error {
+		// Attempting to extend at the start of a tx without extending
+		// the tip should fail.
+		err = db.StoreBalances(wtx, bh1, height+2, nil)
+		require.ErrorIs(t, err, ErrNotExtendingTip)
+
+		return nil
+	})
+	require.NoError(t, err)
+
 	err = db.View(testCtx(t), func(rtx ReadTx) error {
 		// Block hash and height should match after committing.
 		bh, h, err := db.LastProcessedBlock(rtx)
@@ -443,6 +456,209 @@ func testMultipleRollback(t *testing.T, db DB) {
 	})
 	require.NoError(t, err)
 
+}
+
+// testAccountUtxos ensures the Add/Del/List Utxos functions work as expected.
+func testAccountUtxos(t *testing.T, db DB) {
+
+	// Helper functions.
+	outpoint := func(i byte) *wire.OutPoint {
+		return &wire.OutPoint{Hash: chainhash.Hash{0: i}}
+	}
+	account := func(i int) string {
+		return fmt.Sprintf("utxoTestAcct%d", i)
+	}
+
+	type utxo struct {
+		outp wire.OutPoint
+		amt  dcrutil.Amount
+	}
+	wantUtxo := func(outpIdx byte, amt dcrutil.Amount) utxo {
+		outp := outpoint(outpIdx)
+		return utxo{outp: *outp, amt: amt}
+	}
+	checkAccountUtxos := func(dbtx ReadTx, account string, utxos ...utxo) {
+		t.Helper()
+		gotUtxos, err := db.ListUtxos(dbtx, account)
+		require.NoError(t, err)
+		if len(utxos) != len(gotUtxos) {
+			t.Fatalf("unexpected nb of utxos. want=%d got=%d",
+				len(utxos), len(gotUtxos))
+		}
+		for _, wantUtxo := range utxos {
+			gotAmt, ok := gotUtxos[wantUtxo.outp]
+			if !ok {
+				t.Fatalf("outpoint not found in list: %s", wantUtxo.outp)
+			}
+			if gotAmt != wantUtxo.amt {
+				t.Fatalf("unexpected amount in utxo %s. want=%d "+
+					"got=%d", wantUtxo.outp, wantUtxo.amt,
+					gotAmt)
+			}
+		}
+	}
+
+	// Commit some test utxos.
+	err := db.Update(testCtx(t), func(wtx WriteTx) error {
+		// Add 3 utxos for the same account.
+		err := db.AddUtxo(wtx, account(1), outpoint(1), 10)
+		require.NoError(t, err)
+		err = db.AddUtxo(wtx, account(1), outpoint(2), 20)
+		require.NoError(t, err)
+		err = db.AddUtxo(wtx, account(1), outpoint(3), 30)
+		require.NoError(t, err)
+
+		// Add a single utxo for an account.
+		err = db.AddUtxo(wtx, account(2), outpoint(3), 30)
+		require.NoError(t, err)
+
+		// Add and delete the utxo in the same dbtx.
+		err = db.AddUtxo(wtx, account(3), outpoint(4), 40)
+		require.NoError(t, err)
+		err = db.DelUtxo(wtx, account(3), outpoint(4))
+		require.NoError(t, err)
+
+		// Add an utxo that will be deleted in a later tx.
+		err = db.AddUtxo(wtx, account(4), outpoint(5), 50)
+		require.NoError(t, err)
+
+		// Add a large number of utxos to a single account.
+		for i := 0; i < 100; i++ {
+			err = db.AddUtxo(wtx, account(5), outpoint(byte(i)), 50)
+			require.NoError(t, err)
+		}
+
+		// Attempt to delete utxos that haven't been added.
+		err = db.DelUtxo(wtx, account(1), outpoint(255))
+		require.NoError(t, err)
+		err = db.DelUtxo(wtx, account(2), outpoint(255))
+		require.NoError(t, err)
+		err = db.DelUtxo(wtx, account(5), outpoint(255))
+		require.NoError(t, err)
+
+		// Add and delete, then add again the utxo in the same dbtx.
+		err = db.AddUtxo(wtx, account(6), outpoint(6), 60)
+		require.NoError(t, err)
+		err = db.DelUtxo(wtx, account(6), outpoint(6))
+		require.NoError(t, err)
+		err = db.AddUtxo(wtx, account(6), outpoint(6), 66)
+		require.NoError(t, err)
+
+		// Attempt to delete an utxo that doesn't yet exist, then add
+		// it.
+		err = db.DelUtxo(wtx, account(7), outpoint(7))
+		require.NoError(t, err)
+		err = db.AddUtxo(wtx, account(7), outpoint(7), 70)
+		require.NoError(t, err)
+
+		// Attempt to add an utxo twice. The second one should be the
+		// one that gets saved.
+		err = db.AddUtxo(wtx, account(8), outpoint(8), 80)
+		require.NoError(t, err)
+		err = db.AddUtxo(wtx, account(8), outpoint(8), 88)
+		require.NoError(t, err)
+
+		// Add an account with a single utxo that will have additional
+		// ones added later.
+		err = db.AddUtxo(wtx, account(9), outpoint(9), 90)
+		require.NoError(t, err)
+
+		// Add an account with a few utxos that will have additional
+		// ones added later.
+		err = db.AddUtxo(wtx, account(10), outpoint(10), 100)
+		require.NoError(t, err)
+		err = db.AddUtxo(wtx, account(10), outpoint(11), 110)
+		require.NoError(t, err)
+
+		// Check the utxos while in the dbtx.
+		checkAccountUtxos(wtx, account(1), wantUtxo(1, 10),
+			wantUtxo(2, 20), wantUtxo(3, 30))
+		checkAccountUtxos(wtx, account(2), wantUtxo(3, 30))
+		checkAccountUtxos(wtx, account(3))
+		checkAccountUtxos(wtx, account(4), wantUtxo(5, 50))
+		acct5utxos := make([]utxo, 100)
+		for i := 0; i < 100; i++ {
+			acct5utxos[i] = wantUtxo(byte(i), 50)
+		}
+		checkAccountUtxos(wtx, account(5), acct5utxos...)
+		checkAccountUtxos(wtx, account(6), wantUtxo(6, 66))
+		checkAccountUtxos(wtx, account(7), wantUtxo(7, 70))
+		checkAccountUtxos(wtx, account(8), wantUtxo(8, 88))
+		checkAccountUtxos(wtx, account(9), wantUtxo(9, 90))
+		checkAccountUtxos(wtx, account(10), wantUtxo(10, 100),
+			wantUtxo(11, 110))
+
+		checkAccountUtxos(wtx, account(999))
+
+		return nil
+	})
+	require.NoError(t, err)
+
+	// Perform some tests on committed values.
+	err = db.Update(testCtx(t), func(wtx WriteTx) error {
+		// Delete a previously added utxo and add a new one.
+		err := db.DelUtxo(wtx, account(4), outpoint(5))
+		require.NoError(t, err)
+		checkAccountUtxos(wtx, account(4))
+
+		// Attempt to delete an existing utxo, then re-add it.
+		err = db.DelUtxo(wtx, account(7), outpoint(7))
+		require.NoError(t, err)
+		err = db.AddUtxo(wtx, account(7), outpoint(7), 77)
+		require.NoError(t, err)
+
+		// Attempt to re-add an utxo.
+		err = db.AddUtxo(wtx, account(8), outpoint(8), 89)
+		require.NoError(t, err)
+
+		// Delete one outpoint from an account that had a few.
+		err = db.DelUtxo(wtx, account(1), outpoint(2))
+		require.NoError(t, err)
+
+		// Add a bunch of new utxos to existing accounts.
+		for i := 0; i < 20; i++ {
+			err = db.AddUtxo(wtx, account(9), outpoint(byte(100+i)), 90)
+			require.NoError(t, err)
+			err = db.AddUtxo(wtx, account(10), outpoint(byte(100+i)), 100)
+			require.NoError(t, err)
+		}
+
+		// Add a new utxo.
+		err = db.AddUtxo(wtx, account(100), outpoint(100), 100)
+		require.NoError(t, err)
+		return nil
+	})
+	require.NoError(t, err)
+
+	// Verify all utxos again.
+	err = db.View(testCtx(t), func(rtx ReadTx) error {
+		checkAccountUtxos(rtx, account(1), wantUtxo(1, 10), wantUtxo(3, 30))
+		checkAccountUtxos(rtx, account(2), wantUtxo(3, 30))
+		checkAccountUtxos(rtx, account(3))
+		checkAccountUtxos(rtx, account(4))
+		acct5utxos := make([]utxo, 100)
+		for i := 0; i < 100; i++ {
+			acct5utxos[i] = wantUtxo(byte(i), 50)
+		}
+		checkAccountUtxos(rtx, account(5), acct5utxos...)
+		checkAccountUtxos(rtx, account(6), wantUtxo(6, 66))
+		checkAccountUtxos(rtx, account(7), wantUtxo(7, 77))
+		checkAccountUtxos(rtx, account(8), wantUtxo(8, 89))
+
+		acct9utxos := []utxo{wantUtxo(9, 90)}
+		acct10utxos := []utxo{wantUtxo(10, 100), wantUtxo(11, 110)}
+		for i := 0; i < 20; i++ {
+			acct9utxos = append(acct9utxos, wantUtxo(byte(100+i), 90))
+			acct10utxos = append(acct10utxos, wantUtxo(byte(100+i), 100))
+		}
+		checkAccountUtxos(rtx, account(9), acct9utxos...)
+		checkAccountUtxos(rtx, account(10), acct10utxos...)
+
+		checkAccountUtxos(rtx, account(100), wantUtxo(100, 100))
+		checkAccountUtxos(rtx, account(999))
+		return nil
+	})
+	require.NoError(t, err)
 }
 
 // testCloseTwice ensures that trying to close a closed db fails with the
