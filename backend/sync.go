@@ -18,6 +18,74 @@ import (
 func (s *Server) rollbackTip(dbtx backenddb.WriteTx, tipHash *chainhash.Hash,
 	tipHeight int64) error {
 
+	// First: handle utxos. Return spent outputs as utxos and remove new
+	// outputs altogether. This is done taking care to handle disapproval
+	// scenarios.
+
+	// Fetch the block and if it disapproved its parent, fetch the previous
+	// block as well.
+	b, err := s.getBlock(dbtx.Context(), tipHash)
+	if err != nil {
+		return err
+	}
+
+	var prev *wire.MsgBlock
+	if !types.VoteBitsApprovesParent(b.Header.VoteBits) {
+		prev, err = s.getBlock(dbtx.Context(), &b.Header.PrevBlock)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Handle each individual op in the reverse way it's normally done.
+	// Note the negative amounts due to a rollback being exactly the
+	// inverse of connecting a block.
+	applyOp := func(op *types.Op) error {
+		var err error
+		switch {
+		case op.Type == types.OpTypeDebit && op.Status == types.OpStatusSuccess:
+			// Successful (rolled back) input restores utxo.
+			err = s.db.AddUtxo(dbtx, op.Account,
+				&op.In.PreviousOutPoint, -op.Amount)
+
+		case op.Type == types.OpTypeDebit && op.Status == types.OpStatusReversed:
+			// Reversed (rolled back) input removes utxo.
+			err = s.db.DelUtxo(dbtx, op.Account, &op.In.PreviousOutPoint)
+
+		case op.Type == types.OpTypeCredit && op.Status == types.OpStatusSuccess:
+			// Successful (rolled back) output removes utxo.
+			outp := &wire.OutPoint{
+				Hash:  op.TxHash,
+				Index: uint32(op.IOIndex),
+				Tree:  op.Tree,
+			}
+			err = s.db.DelUtxo(dbtx, op.Account, outp)
+
+		case op.Type == types.OpTypeCredit && op.Status == types.OpStatusReversed:
+			// Reversed (rolled back) output returns the utxo.
+			outp := &wire.OutPoint{
+				Hash:  op.TxHash,
+				Index: uint32(op.IOIndex),
+				Tree:  op.Tree,
+			}
+			err = s.db.AddUtxo(dbtx, op.Account, outp, -op.Amount)
+
+		default:
+			err = fmt.Errorf("unknown op type: %v and "+
+				"status: %v", op.Type, op.Status)
+		}
+
+		return err
+	}
+
+	// Process the rolled back block.
+	fetchInputs := s.makeInputsFetcher(dbtx.Context(), nil)
+	err = types.IterateBlockOps(b, prev, fetchInputs, applyOp, s.chainParams)
+	if err != nil {
+		return err
+	}
+
+	// Finally roll back the most recent tip.
 	return s.db.RollbackTip(dbtx, *tipHash, tipHeight)
 }
 

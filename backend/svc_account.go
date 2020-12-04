@@ -128,7 +128,37 @@ func (s *Server) preProcessAccountBlock(ctx context.Context, bh *chainhash.Hash,
 			// network call back to dcrd.
 			updateUtxoSet(op, utxoSet)
 
-			return nil
+			var err error
+			switch {
+			case op.Type == types.OpTypeDebit && op.Status == types.OpStatusSuccess:
+				// Successful input spends utxo.
+				err = s.db.DelUtxo(dbtx, op.Account, &op.In.PreviousOutPoint)
+			case op.Type == types.OpTypeDebit && op.Status == types.OpStatusReversed:
+				// Reversed input restores utxo.
+				err = s.db.AddUtxo(dbtx, op.Account,
+					&op.In.PreviousOutPoint, op.Amount)
+			case op.Type == types.OpTypeCredit && op.Status == types.OpStatusSuccess:
+				// Successful output create utxo.
+				outp := &wire.OutPoint{
+					Hash:  op.TxHash,
+					Index: uint32(op.IOIndex),
+					Tree:  op.Tree,
+				}
+				err = s.db.AddUtxo(dbtx, op.Account, outp, op.Amount)
+			case op.Type == types.OpTypeCredit && op.Status == types.OpStatusReversed:
+				// Reversed output disappears with utxo.
+				outp := &wire.OutPoint{
+					Hash:  op.TxHash,
+					Index: uint32(op.IOIndex),
+					Tree:  op.Tree,
+				}
+				err = s.db.DelUtxo(dbtx, account, outp)
+
+			default:
+				err = fmt.Errorf("unknown op type: %v and "+
+					"status: %v", op.Type, op.Status)
+			}
+			return err
 		}
 
 		err = types.IterateBlockOps(b, prev, fetchInputs, applyOp, s.chainParams)
@@ -297,5 +327,52 @@ func (s *Server) AccountBalance(ctx context.Context, req *rtypes.AccountBalanceR
 
 // AccountCoins returns the coins (i.e. utxos) belonging to a given account.
 func (s *Server) AccountCoins(ctx context.Context, req *rtypes.AccountCoinsRequest) (*rtypes.AccountCoinsResponse, *rtypes.Error) {
-	return nil, types.ErrUnimplemented.RError()
+
+	saddr := req.AccountIdentifier.Address
+	if saddr != types.TreasuryAccountAdddress {
+		// Validate non-treasury addresses.
+		err := types.CheckRosettaAccount(req.AccountIdentifier, s.chainParams)
+		if err != nil {
+			return nil, types.ErrInvalidAccountIdAddr.Msg(err.Error()).RError()
+		}
+	}
+
+	var (
+		utxos     map[wire.OutPoint]dcrutil.Amount
+		tipHash   chainhash.Hash
+		tipHeight int64
+	)
+
+	err := s.db.View(ctx, func(dbtx backenddb.ReadTx) error {
+		var err error
+		tipHash, tipHeight, err = s.db.LastProcessedBlock(dbtx)
+		if err == nil {
+			utxos, err = s.db.ListUtxos(dbtx, saddr)
+		}
+
+		return err
+	})
+	if err != nil {
+		return nil, types.RError(err)
+	}
+
+	coins := make([]*rtypes.Coin, 0, len(utxos))
+	for outp, amt := range utxos {
+		coin := &rtypes.Coin{
+			CoinIdentifier: &rtypes.CoinIdentifier{
+				Identifier: outp.String(),
+			},
+			Amount: types.DcrAmountToRosetta(amt),
+		}
+		coins = append(coins, coin)
+	}
+
+	res := &rtypes.AccountCoinsResponse{
+		Coins: coins,
+		BlockIdentifier: &rtypes.BlockIdentifier{
+			Hash:  tipHash.String(),
+			Index: tipHeight,
+		},
+	}
+	return res, nil
 }

@@ -197,11 +197,70 @@ func testSimnetBalances(t *testing.T, db backenddb.DB) {
 		t.Fatalf("timeout waiting for chain tip")
 	}
 
+	type utxo struct {
+		outp wire.OutPoint
+		amt  int64
+	}
+	assertCoinsMatch := func(wantUtxos map[string]*utxo) {
+		t.Helper()
+
+		req := &rtypes.AccountCoinsRequest{
+			AccountIdentifier: &rtypes.AccountIdentifier{
+				Address: p2pkhAddr.Address(),
+				Metadata: map[string]interface{}{
+					"script_version": uint16(0),
+				},
+			},
+		}
+
+		res, rerr := svr.AccountCoins(testCtx(t), req)
+		require.Nil(t, rerr)
+
+		if len(res.Coins) != len(wantUtxos) {
+			t.Fatalf("unexpected nb of coins. want=%d got=%d",
+				len(wantUtxos), len(res.Coins))
+		}
+		wantUtxosKeys := make(map[string]struct{}, len(wantUtxos))
+		for k := range wantUtxos {
+			wantUtxosKeys[k] = struct{}{}
+		}
+		for _, gotCoin := range res.Coins {
+			gotOutp := gotCoin.CoinIdentifier.Identifier
+			wantUtxo, ok := wantUtxos[gotOutp]
+			if !ok {
+				t.Fatalf("could not find returned coin id %s",
+					gotCoin.CoinIdentifier.Identifier)
+			}
+			gotAmt, err := strconv.ParseInt(gotCoin.Amount.Value, 10, 64)
+			require.NoError(t, err)
+
+			if gotAmt != wantUtxo.amt {
+				t.Fatalf("unexpected utxo amount. want=%d got=%d",
+					wantUtxo.amt, gotAmt)
+			}
+			delete(wantUtxosKeys, gotOutp)
+		}
+		if len(wantUtxosKeys) > 0 {
+			t.Fatalf("some utxos were not returned by the server: %v", wantUtxosKeys)
+		}
+
+	}
+
+	wantUtxos := make(map[string]*utxo)
+	addWantUtxo := func(txh *chainhash.Hash, index uint32, value int64) {
+		outp := wire.OutPoint{Hash: *txh, Index: index}
+		wantUtxos[outp.String()] = &utxo{outp: outp, amt: value}
+	}
+	delWantUtxo := func(outp wire.OutPoint) {
+		delete(wantUtxos, outp.String())
+	}
+
 	// Send to the given address and mine a few blocks to ensure the server
 	// can process an already started blockchain.
 	coin := int64(1e8)
 	txOut := &wire.TxOut{PkScript: p2pkhScript, Value: coin}
-	_, err = hn.SendOutputs([]*wire.TxOut{txOut}, defaultFeeRate)
+	txh, err := hn.SendOutputs([]*wire.TxOut{txOut}, defaultFeeRate)
+	addWantUtxo(txh, 0, coin)
 	require.NoError(t, err)
 	_, err = vw.GenerateBlocks(testCtx(t), 5)
 	require.NoError(t, err)
@@ -254,8 +313,9 @@ func testSimnetBalances(t *testing.T, db backenddb.DB) {
 			bestHash, cbi.Hash)
 	}
 
-	// The current account balance should match the expected.
+	// The current account balance and coins should match the expected.
 	assertTipBalance(wantBalance)
+	assertCoinsMatch(wantUtxos)
 
 	// Send more coins to the address and ensure the tx is found in the
 	// mempool.
@@ -275,11 +335,14 @@ func testSimnetBalances(t *testing.T, db backenddb.DB) {
 	// balances).
 	assertTipBalance(wantBalance)
 
-	// Mine the tx and assert the account amount increased.
+	// Mine the tx and assert the account amount increased and the new coin
+	// is tracked.
 	_, err = vw.GenerateBlocks(testCtx(t), 1)
 	require.NoError(t, err)
 	wantBalance += coin
 	assertTipBalance(wantBalance)
+	addWantUtxo(sentTxHash, 0, coin)
+	assertCoinsMatch(wantUtxos)
 
 	// Spend from this account, mine the tx and verify the balance changed.
 	//
@@ -305,14 +368,18 @@ func testSimnetBalances(t *testing.T, db backenddb.DB) {
 	require.NoError(t, err)
 
 	// Publish and mine the tx.
-	_, err = hn.Node.SendRawTransaction(testCtx(t), spendTx, true)
+	spendTxHash, err := hn.Node.SendRawTransaction(testCtx(t), spendTx, true)
 	require.NoError(t, err)
 	_, err = vw.GenerateBlocks(testCtx(t), 1)
 	require.NoError(t, err)
+	delWantUtxo(wire.OutPoint{Hash: *sentTxHash})
+	addWantUtxo(spendTxHash, 0, coin-spendAmount)
 
-	// Ensure the balance is correct.
+	// Ensure the balance is correct and the utxo set for the account
+	// changed correctly.
 	wantBalance -= spendAmount
 	assertTipBalance(wantBalance)
+	assertCoinsMatch(wantUtxos)
 
 	// Generate a reorg and reconnect the nodes to drop spendTx from
 	// account balance calcs.
@@ -326,6 +393,12 @@ func testSimnetBalances(t *testing.T, db backenddb.DB) {
 	// spent anymore.
 	wantBalance += spendAmount
 	assertTipBalance(wantBalance)
+
+	// Ensure the utxo set for this account was properly updated by
+	// removing the second tx and restoring the first one.
+	delWantUtxo(wire.OutPoint{Hash: *spendTxHash})
+	addWantUtxo(sentTxHash, 0, coin)
+	assertCoinsMatch(wantUtxos)
 }
 
 // TestSimnetBalances runs an rpctest-based simnet, generates a blockchain that
