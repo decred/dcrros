@@ -218,7 +218,7 @@ func (s *Server) ConstructionMetadata(ctx context.Context,
 // the number of tx inputs both when serializing and deserializing.
 type constructionTx struct {
 	tx            *wire.MsgTx
-	prevOutPoints map[wire.OutPoint]*types.PrevInput
+	prevOutPoints map[wire.OutPoint]*types.PrevOutput
 }
 
 var (
@@ -377,10 +377,10 @@ func (ctrtx *constructionTx) deserialize(s string) error {
 			errWrongNbPrevOuts, len(ctrtx.tx.TxIn),
 			nbPrevOuts)
 	}
-	ctrtx.prevOutPoints = make(map[wire.OutPoint]*types.PrevInput, nbPrevOuts)
+	ctrtx.prevOutPoints = make(map[wire.OutPoint]*types.PrevOutput, nbPrevOuts)
 	for i := 0; i < int(nbPrevOuts); i++ {
 		outp := ctrtx.tx.TxIn[i].PreviousOutPoint
-		prevOut := &types.PrevInput{}
+		prevOut := &types.PrevOutput{}
 		if prevOut.Amount, err = readAmount(); err != nil {
 			return err
 		}
@@ -433,7 +433,7 @@ func (s *Server) ConstructionPayloads(ctx context.Context,
 	// data.
 	ctrtx := new(constructionTx)
 	ctrtx.tx = tx
-	ctrtx.prevOutPoints, err = types.ExtractPrevInputsFromOps(req.Operations, s.chainParams)
+	ctrtx.prevOutPoints, err = types.ExtractPrevOutputsFromOps(req.Operations, s.chainParams)
 	if err != nil {
 		return nil, types.RError(err)
 	}
@@ -467,8 +467,8 @@ func (s *Server) ConstructionParse(ctx context.Context,
 
 	// We use the the MempoolTxToRosetta function to do the conversion
 	// since it's likely this tx will be broadcast in a moment.
-	fetchInputs := s.makeInputsFetcher(ctx, ctrtx.prevOutPoints)
-	rtx, err := types.MempoolTxToRosetta(ctrtx.tx, fetchInputs, s.chainParams)
+	fetchPrevOuts := s.makePrevOutsFetcher(ctx, ctrtx.prevOutPoints)
+	rtx, err := types.MempoolTxToRosetta(ctrtx.tx, fetchPrevOuts, s.chainParams)
 	if err != nil {
 		return nil, types.RError(err)
 	}

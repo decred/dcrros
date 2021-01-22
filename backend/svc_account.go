@@ -20,7 +20,7 @@ import (
 
 var _ rserver.AccountAPIServicer = (*Server)(nil)
 
-func updateUtxoSet(op *types.Op, utxoSet map[wire.OutPoint]*types.PrevInput) {
+func updateUtxoSet(op *types.Op, utxoSet map[wire.OutPoint]*types.PrevOutput) {
 	if utxoSet == nil {
 		return
 	}
@@ -39,7 +39,7 @@ func updateUtxoSet(op *types.Op, utxoSet map[wire.OutPoint]*types.PrevInput) {
 			Index: uint32(op.IOIndex),
 			Tree:  op.Tree,
 		}
-		utxoSet[outp] = &types.PrevInput{
+		utxoSet[outp] = &types.PrevOutput{
 			Amount:   op.Amount,
 			PkScript: op.Out.PkScript,
 			Version:  op.Out.Version,
@@ -47,7 +47,7 @@ func updateUtxoSet(op *types.Op, utxoSet map[wire.OutPoint]*types.PrevInput) {
 
 	case typ == types.OpTypeDebit && st == types.OpStatusReversed:
 		// Reversed input returns entry to the utxo set.
-		utxoSet[op.In.PreviousOutPoint] = op.PrevInput
+		utxoSet[op.In.PreviousOutPoint] = op.PrevOutput
 
 	case typ == types.OpTypeCredit && st == types.OpStatusReversed:
 		// Reversed output removes entry from the utxo set.
@@ -78,8 +78,8 @@ func (s *Server) lastProcessedBlock(ctx context.Context) (*chainhash.Hash, int64
 	return &tipHash, tipHeight, err
 }
 
-func (s *Server) preProcessAccountBlock(ctx context.Context, bh *chainhash.Hash, b, prev *wire.MsgBlock, utxoSet map[wire.OutPoint]*types.PrevInput) error {
-	fetchInputs := s.makeInputsFetcher(ctx, utxoSet)
+func (s *Server) preProcessAccountBlock(ctx context.Context, bh *chainhash.Hash, b, prev *wire.MsgBlock, utxoSet map[wire.OutPoint]*types.PrevOutput) error {
+	fetchPrevOuts := s.makePrevOutsFetcher(ctx, utxoSet)
 
 	height := int64(b.Header.Height)
 	newBalances := make(map[string]dcrutil.Amount)
@@ -124,7 +124,7 @@ func (s *Server) preProcessAccountBlock(ctx context.Context, bh *chainhash.Hash,
 			newBalances[account] += op.Amount
 
 			// Modify the utxo set according to this op so
-			// fetchInputs can be implemented without requiring a
+			// fetchPrevOuts can be implemented without requiring a
 			// network call back to dcrd.
 			updateUtxoSet(op, utxoSet)
 
@@ -161,7 +161,7 @@ func (s *Server) preProcessAccountBlock(ctx context.Context, bh *chainhash.Hash,
 			return err
 		}
 
-		err = types.IterateBlockOps(b, prev, fetchInputs, applyOp, s.chainParams)
+		err = types.IterateBlockOps(b, prev, fetchPrevOuts, applyOp, s.chainParams)
 		if err != nil {
 			return err
 		}
@@ -242,7 +242,7 @@ func (s *Server) preProcessAccounts(ctx context.Context) error {
 	// Note this isn't a true utxoset because it doesn't handle reorgs, but
 	// since outputs aren't malleable and inexistent entries are looked for
 	// in the blockchain, this is safe to use as is.
-	utxoSet := make(map[wire.OutPoint]*types.PrevInput)
+	utxoSet := make(map[wire.OutPoint]*types.PrevOutput)
 
 	// Sequentially process the chain.
 	svrLog.Infof("Pre-processing accounts in blocks starting at %d", startHeight)

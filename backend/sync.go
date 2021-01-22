@@ -79,8 +79,8 @@ func (s *Server) rollbackTip(dbtx backenddb.WriteTx, tipHash *chainhash.Hash,
 	}
 
 	// Process the rolled back block.
-	fetchInputs := s.makeInputsFetcher(dbtx.Context(), nil)
-	err = types.IterateBlockOps(b, prev, fetchInputs, applyOp, s.chainParams)
+	fetchPrevOuts := s.makePrevOutsFetcher(dbtx.Context(), nil)
+	err = types.IterateBlockOps(b, prev, fetchPrevOuts, applyOp, s.chainParams)
 	if err != nil {
 		return err
 	}
@@ -243,7 +243,7 @@ func (s *Server) reorgToParentOf(ctx context.Context, bh *chainhash.Hash,
 // switchChainTo switches the DB chain to the specified block, handling reorgs
 // as necessary.
 func (s *Server) switchChainTo(ctx context.Context, bh *chainhash.Hash,
-	b *wire.MsgBlock, utxoSet map[wire.OutPoint]*types.PrevInput) error {
+	b *wire.MsgBlock, utxoSet map[wire.OutPoint]*types.PrevOutput) error {
 
 	// Reorg (if needed) to the parent of the passed block.
 	prev, err := s.reorgToParentOf(ctx, bh, b)

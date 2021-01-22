@@ -278,13 +278,13 @@ func RosettaOpsToTx(txMeta map[string]interface{}, ops []*rtypes.Operation, chai
 	return tx, nil
 }
 
-// prevInputFromDebitOp re-calculates the PrevInput structure from a given
+// prevOutputFromDebitOp re-calculates the PrevOutput structure from a given
 // debit operation.
-func prevInputFromDebitOp(op *rtypes.Operation, chainParams *chaincfg.Params) (
-	*PrevInput, dcrutil.Address, error) {
+func prevOutputFromDebitOp(op *rtypes.Operation, chainParams *chaincfg.Params) (
+	*PrevOutput, dcrutil.Address, error) {
 
 	if op.Type != string(OpTypeDebit) {
-		return nil, nil, fmt.Errorf("op must be a debit to extract prevInput")
+		return nil, nil, fmt.Errorf("op must be a debit to extract prevOutput")
 	}
 	if op.Account == nil {
 		return nil, nil, fmt.Errorf("account cannot be nil")
@@ -325,7 +325,7 @@ func prevInputFromDebitOp(op *rtypes.Operation, chainParams *chaincfg.Params) (
 		amount = -amount
 	}
 
-	return &PrevInput{
+	return &PrevOutput{
 		PkScript: pkScript,
 		Version:  version,
 		Amount:   amount,
@@ -339,7 +339,7 @@ func extractInputSignPayload(op *rtypes.Operation, tx *wire.MsgTx, idx int,
 		return nil, fmt.Errorf("trying to sign inexistent input %d", idx)
 	}
 
-	prevInput, addr, err := prevInputFromDebitOp(op, chainParams)
+	prevOutput, addr, err := prevOutputFromDebitOp(op, chainParams)
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +365,7 @@ func extractInputSignPayload(op *rtypes.Operation, tx *wire.MsgTx, idx int,
 		return nil, nil
 	}
 
-	sigHash, err := txscript.CalcSignatureHash(prevInput.PkScript,
+	sigHash, err := txscript.CalcSignatureHash(prevOutput.PkScript,
 		sigHashType, tx, idx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error during calcSigHash: %v", err)
@@ -555,27 +555,27 @@ func CombineTxSigs(sigs []*rtypes.Signature, tx *wire.MsgTx,
 	return nil
 }
 
-// ExtractPrevInputsFromOps iterates over all debits of the given list of
-// operations and generates a map OutPoint => PrevInput that can be used to
+// ExtractPrevOutputsFromOps iterates over all debits of the given list of
+// operations and generates a map OutPoint => PrevOutput that can be used to
 // later identify the previous outputs of the debits.
-func ExtractPrevInputsFromOps(ops []*rtypes.Operation, chainParams *chaincfg.Params) (
-	map[wire.OutPoint]*PrevInput, error) {
+func ExtractPrevOutputsFromOps(ops []*rtypes.Operation, chainParams *chaincfg.Params) (
+	map[wire.OutPoint]*PrevOutput, error) {
 
-	res := make(map[wire.OutPoint]*PrevInput)
+	res := make(map[wire.OutPoint]*PrevOutput)
 
 	for i, op := range ops {
 		if op.Type != string(OpTypeDebit) {
 			continue
 		}
 
-		prevInput, _, err := prevInputFromDebitOp(op, chainParams)
+		prevOutput, _, err := prevOutputFromDebitOp(op, chainParams)
 		if err != nil {
-			return nil, fmt.Errorf("unable to extract prevInput "+
+			return nil, fmt.Errorf("unable to extract prevOutput "+
 				"from debit %d: %v", i, err)
 		}
 
 		// Ignore unknown script versions and addresses.
-		if prevInput == nil {
+		if prevOutput == nil {
 			continue
 		}
 
@@ -592,7 +592,7 @@ func ExtractPrevInputsFromOps(ops []*rtypes.Operation, chainParams *chaincfg.Par
 				"coin_action", i)
 		}
 
-		res[outPoint] = prevInput
+		res[outPoint] = prevOutput
 	}
 
 	return res, nil

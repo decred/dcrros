@@ -232,7 +232,7 @@ func TestConstructionTxSerialize(t *testing.T) {
 				TxIn:  []*wire.TxIn{},
 				TxOut: []*wire.TxOut{},
 			},
-			prevOutPoints: map[wire.OutPoint]*types.PrevInput{},
+			prevOutPoints: map[wire.OutPoint]*types.PrevOutput{},
 		},
 		wantStr: "0100000000000000000000000000000000",
 	}, {
@@ -242,7 +242,7 @@ func TestConstructionTxSerialize(t *testing.T) {
 				TxIn:  []*wire.TxIn{{SignatureScript: []byte{}}},
 				TxOut: []*wire.TxOut{{PkScript: []byte{}}},
 			},
-			prevOutPoints: map[wire.OutPoint]*types.PrevInput{
+			prevOutPoints: map[wire.OutPoint]*types.PrevOutput{
 				{}: {PkScript: []byte{}},
 			},
 		},
@@ -268,7 +268,7 @@ func TestConstructionTxSerialize(t *testing.T) {
 					PkScript: slice2,
 				}},
 			},
-			prevOutPoints: map[wire.OutPoint]*types.PrevInput{
+			prevOutPoints: map[wire.OutPoint]*types.PrevOutput{
 				prevOut1: {
 					Amount:   0x2121212121212121,
 					Version:  0x8787,
@@ -301,7 +301,7 @@ func TestConstructionTxSerialize(t *testing.T) {
 					PkScript: slice2,
 				}},
 			},
-			prevOutPoints: map[wire.OutPoint]*types.PrevInput{
+			prevOutPoints: map[wire.OutPoint]*types.PrevOutput{
 				prevOut2: {
 					PkScript: []byte{},
 				},
@@ -323,7 +323,7 @@ func TestConstructionTxSerialize(t *testing.T) {
 				}},
 				TxOut: []*wire.TxOut{{PkScript: []byte{}}},
 			},
-			prevOutPoints: map[wire.OutPoint]*types.PrevInput{
+			prevOutPoints: map[wire.OutPoint]*types.PrevOutput{
 				{}: {PkScript: []byte{}},
 			},
 		},
@@ -338,7 +338,7 @@ func TestConstructionTxSerialize(t *testing.T) {
 				}},
 				TxOut: []*wire.TxOut{{PkScript: []byte{}}},
 			},
-			prevOutPoints: map[wire.OutPoint]*types.PrevInput{},
+			prevOutPoints: map[wire.OutPoint]*types.PrevOutput{},
 		},
 		wantErr: errWrongNbPrevOuts,
 	}}
@@ -400,7 +400,7 @@ func TestConstructionTxDeserialize(t *testing.T) {
 				TxIn:  []*wire.TxIn{},
 				TxOut: []*wire.TxOut{},
 			},
-			prevOutPoints: map[wire.OutPoint]*types.PrevInput{},
+			prevOutPoints: map[wire.OutPoint]*types.PrevOutput{},
 		},
 	}, {
 		name:       "one input, one output both empty",
@@ -410,7 +410,7 @@ func TestConstructionTxDeserialize(t *testing.T) {
 				TxIn:  []*wire.TxIn{{SignatureScript: []byte{}}},
 				TxOut: []*wire.TxOut{{PkScript: []byte{}}},
 			},
-			prevOutPoints: map[wire.OutPoint]*types.PrevInput{
+			prevOutPoints: map[wire.OutPoint]*types.PrevOutput{
 				{}: {PkScript: []byte{}},
 			},
 		},
@@ -436,7 +436,7 @@ func TestConstructionTxDeserialize(t *testing.T) {
 					PkScript: slice2,
 				}},
 			},
-			prevOutPoints: map[wire.OutPoint]*types.PrevInput{
+			prevOutPoints: map[wire.OutPoint]*types.PrevOutput{
 				prevOut1: {
 					Amount:   0x2121212121212121,
 					Version:  0x8787,
@@ -469,7 +469,7 @@ func TestConstructionTxDeserialize(t *testing.T) {
 					PkScript: slice2,
 				}},
 			},
-			prevOutPoints: map[wire.OutPoint]*types.PrevInput{
+			prevOutPoints: map[wire.OutPoint]*types.PrevOutput{
 				prevOut2: {
 					PkScript: []byte{},
 				},
@@ -1060,7 +1060,7 @@ func TestConstructionParseEndpoint(t *testing.T) {
 		if req == nil {
 			ctrtx := new(constructionTx)
 			ctrtx.tx = tx
-			ctrtx.prevOutPoints, err = types.ExtractPrevInputsFromOps(tc.wantOps, params)
+			ctrtx.prevOutPoints, err = types.ExtractPrevOutputsFromOps(tc.wantOps, params)
 			require.NoError(t, err)
 			sertx, err := ctrtx.serialize()
 			require.NoError(t, err)
@@ -1288,7 +1288,7 @@ func TestConstructionCombine(t *testing.T) {
 		var err error
 		ctrtx := new(constructionTx)
 		ctrtx.tx = tx
-		ctrtx.prevOutPoints, err = types.ExtractPrevInputsFromOps(tc.debits, params)
+		ctrtx.prevOutPoints, err = types.ExtractPrevOutputsFromOps(tc.debits, params)
 		require.NoError(t, err)
 		serTx, err := ctrtx.serialize()
 		require.NoError(t, err)
@@ -1346,7 +1346,7 @@ func TestConstructionHashEndpoint(t *testing.T) {
 	dummyTxh := dummyTx.TxHash()
 	ctrtx := &constructionTx{
 		tx: dummyTx,
-		prevOutPoints: map[wire.OutPoint]*types.PrevInput{
+		prevOutPoints: map[wire.OutPoint]*types.PrevOutput{
 			{}: {},
 		},
 	}
@@ -1426,7 +1426,7 @@ func TestConstructionSubmitEndpoint(t *testing.T) {
 	dummyTxh := dummyTx.TxHash()
 	ctrtx := &constructionTx{
 		tx: dummyTx,
-		prevOutPoints: map[wire.OutPoint]*types.PrevInput{
+		prevOutPoints: map[wire.OutPoint]*types.PrevOutput{
 			{}: {},
 		},
 	}

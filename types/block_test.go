@@ -34,9 +34,9 @@ type txToRosettaTestCase struct {
 }
 
 type txToRosettaTestCtx struct {
-	testCases   []*txToRosettaTestCase
-	chainParams *chaincfg.Params
-	fetchInputs PrevInputsFetcher
+	testCases     []*txToRosettaTestCase
+	chainParams   *chaincfg.Params
+	fetchPrevOuts PrevOutputsFetcher
 }
 
 // txToRosettaTestCases builds a set of test cases for converting decred
@@ -137,9 +137,9 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 		BlockIndex:       wire.NullBlockIndex,
 	}
 
-	// fetchInputs only needs to return the prevInputs we use.
-	fetchInputs := func(...*wire.OutPoint) (map[wire.OutPoint]*PrevInput, error) {
-		return map[wire.OutPoint]*PrevInput{
+	// fetchPrevOuts only needs to return the prevOutputs we use.
+	fetchPrevOuts := func(...*wire.OutPoint) (map[wire.OutPoint]*PrevOutput, error) {
+		return map[wire.OutPoint]*PrevOutput{
 			*prevOut1: {
 				PkScript: pks1,
 				Amount:   1,
@@ -563,9 +563,9 @@ func txToRosettaTestCases() *txToRosettaTestCtx {
 		}}
 
 	return &txToRosettaTestCtx{
-		testCases:   testCases,
-		chainParams: chainParams,
-		fetchInputs: fetchInputs,
+		testCases:     testCases,
+		chainParams:   chainParams,
+		fetchPrevOuts: fetchPrevOuts,
 	}
 }
 
@@ -712,12 +712,12 @@ func TestTxToBlockOps(t *testing.T) {
 						wop.Amount, op.Amount)
 				}
 
-				// TODO: enable test after rewriting PrevInput.
+				// TODO: enable test after rewriting PrevOutput.
 				/*
-					if wop.PrevInput != op.PrevInput {
-						t.Fatalf("op %d incorrect PrevInput. "+
+					if wop.PrevOutput != op.PrevOutput {
+						t.Fatalf("op %d incorrect PrevOutput. "+
 							"want=%v, got=%v", opIdx,
-							wop.PrevInput, op.PrevInput)
+							wop.PrevOutput, op.PrevOutput)
 					}
 				*/
 
@@ -731,7 +731,7 @@ func TestTxToBlockOps(t *testing.T) {
 				return nil
 			}
 
-			err := iterateBlockOpsInTx(op, tests.fetchInputs,
+			err := iterateBlockOpsInTx(op, tests.fetchPrevOuts,
 				applyOp, tests.chainParams)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -815,7 +815,7 @@ func TestBlockToRosetta(t *testing.T) {
 	// First test case: b approves prev.
 	t.Run("approves parent", func(t *testing.T) {
 		b.Header.VoteBits = 0x01
-		rb, err := WireBlockToRosetta(b, prev, tctx.fetchInputs, tctx.chainParams)
+		rb, err := WireBlockToRosetta(b, prev, tctx.fetchPrevOuts, tctx.chainParams)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -849,7 +849,7 @@ func TestBlockToRosetta(t *testing.T) {
 	// Second test case: b disapproves prev.
 	t.Run("disapproves parent", func(t *testing.T) {
 		b.Header.VoteBits = 0x00
-		rb, err := WireBlockToRosetta(b, prev, tctx.fetchInputs, tctx.chainParams)
+		rb, err := WireBlockToRosetta(b, prev, tctx.fetchPrevOuts, tctx.chainParams)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -883,7 +883,7 @@ func TestBlockToRosetta(t *testing.T) {
 	// (function should error).
 	t.Run("disapproves parent with error", func(t *testing.T) {
 		b.Header.VoteBits = 0x00
-		_, err := WireBlockToRosetta(b, nil, tctx.fetchInputs, tctx.chainParams)
+		_, err := WireBlockToRosetta(b, nil, tctx.fetchPrevOuts, tctx.chainParams)
 		if err != ErrNeedsPreviousBlock {
 			t.Fatalf("unexpected error. want=%v got=%v", ErrNeedsPreviousBlock, err)
 		}
@@ -917,7 +917,7 @@ func TestMempoolTxToRosetta(t *testing.T) {
 		tc := tc
 		tci := tci
 		ok := t.Run(tc.name, func(t *testing.T) {
-			tx, err := MempoolTxToRosetta(tc.tx, tctx.fetchInputs,
+			tx, err := MempoolTxToRosetta(tc.tx, tctx.fetchPrevOuts,
 				tctx.chainParams)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)

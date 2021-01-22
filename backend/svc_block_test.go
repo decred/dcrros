@@ -191,8 +191,9 @@ func TestBlockEndpoint(t *testing.T) {
 	testDbInstances(t, true, testBlockEndpoint)
 }
 
-// TestInputsFetcher verifies the inputsFetcher function behaves as expected.
-func TestInputsFetcher(t *testing.T) {
+// TestPrevOutsFetcher verifies the PrevOutsFetcher function behaves as
+// expected.
+func TestPrevOutsFetcher(t *testing.T) {
 	t.Parallel()
 
 	params := chaincfg.RegNetParams()
@@ -221,7 +222,7 @@ func TestInputsFetcher(t *testing.T) {
 
 	type testCase struct {
 		name         string
-		utxoSet      map[wire.OutPoint]*types.PrevInput
+		utxoSet      map[wire.OutPoint]*types.PrevOutput
 		reqOutPoints []*wire.OutPoint
 		forceErr     error
 		wantErr      error
@@ -233,7 +234,7 @@ func TestInputsFetcher(t *testing.T) {
 		reqOutPoints: []*wire.OutPoint{&correctOutPoint0},
 	}, {
 		name: "prevout exists in utxo set",
-		utxoSet: map[wire.OutPoint]*types.PrevInput{
+		utxoSet: map[wire.OutPoint]*types.PrevOutput{
 			correctOutPoint0: nil,
 		},
 		reqOutPoints: []*wire.OutPoint{&correctOutPoint0},
@@ -246,21 +247,21 @@ func TestInputsFetcher(t *testing.T) {
 	}, {
 		name:         "different prevouts from same tx in utxo set",
 		reqOutPoints: []*wire.OutPoint{&correctOutPoint0, &correctOutPoint1},
-		utxoSet: map[wire.OutPoint]*types.PrevInput{
+		utxoSet: map[wire.OutPoint]*types.PrevOutput{
 			correctOutPoint0: nil,
 			correctOutPoint1: nil,
 		},
 	}, {
 		name:         "different prevouts from same tx partially in utxo set",
 		reqOutPoints: []*wire.OutPoint{&correctOutPoint0, &correctOutPoint1},
-		utxoSet: map[wire.OutPoint]*types.PrevInput{
+		utxoSet: map[wire.OutPoint]*types.PrevOutput{
 			correctOutPoint0: nil,
 		},
 	}, {
 		name: "different prevouts partially in utxo set",
 		reqOutPoints: []*wire.OutPoint{&correctOutPoint0,
 			&correctOutPoint1, &correctOutPointTx2},
-		utxoSet: map[wire.OutPoint]*types.PrevInput{
+		utxoSet: map[wire.OutPoint]*types.PrevOutput{
 			correctOutPointTx2: nil,
 		},
 	}, {
@@ -288,7 +289,7 @@ func TestInputsFetcher(t *testing.T) {
 			return c.getRawTransaction(ctx, txHash)
 		}
 
-		res, err := svr.inputsFetcher(testCtx(t), tc.utxoSet,
+		res, err := svr.prevOutsFetcher(testCtx(t), tc.utxoSet,
 			tc.reqOutPoints...)
 		if !errors.Is(err, tc.wantErr) {
 			t.Fatalf("unexpected error. want=%v, got=%v",

@@ -693,15 +693,15 @@ func TestCombineSigs(t *testing.T) {
 	}
 }
 
-// TestExtractPrevInputsFromOps ensures the ExtractPRevInputsFromOps behaves as
+// TestExtractPrevOutputsFromOps ensures the ExtractPRevInputsFromOps behaves as
 // expected.
-func TestExtractPrevInputsFromOps(t *testing.T) {
+func TestExtractPrevOutputsFromOps(t *testing.T) {
 	chainParams := chaincfg.RegNetParams()
 
 	type testCase struct {
 		name    string
 		ops     []*rtypes.Operation
-		target  map[wire.OutPoint]*PrevInput
+		target  map[wire.OutPoint]*PrevOutput
 		wantErr bool
 	}
 
@@ -713,13 +713,13 @@ func TestExtractPrevInputsFromOps(t *testing.T) {
 	testCases := []testCase{{
 		name:   "no ops",
 		ops:    []*rtypes.Operation{},
-		target: map[wire.OutPoint]*PrevInput{},
+		target: map[wire.OutPoint]*PrevOutput{},
 	}, {
 		name: "no debits",
 		ops: []*rtypes.Operation{{
 			Type: "credit",
 		}},
-		target: map[wire.OutPoint]*PrevInput{},
+		target: map[wire.OutPoint]*PrevOutput{},
 	}, {
 		name: "one debit",
 		ops: []*rtypes.Operation{{
@@ -738,7 +738,7 @@ func TestExtractPrevInputsFromOps(t *testing.T) {
 				CoinAction: "coin_spent",
 			},
 		}},
-		target: map[wire.OutPoint]*PrevInput{
+		target: map[wire.OutPoint]*PrevOutput{
 			{Hash: hashHash1, Index: 1}: {
 				PkScript: mustHex("76a91438336cea45bafa04c6c1dab1e588c8ce7de3a71b88ac"),
 				Amount:   10,
@@ -778,7 +778,7 @@ func TestExtractPrevInputsFromOps(t *testing.T) {
 				CoinAction: "coin_spent",
 			},
 		}},
-		target: map[wire.OutPoint]*PrevInput{
+		target: map[wire.OutPoint]*PrevOutput{
 			{Hash: hashHash1, Index: 1}: {
 				PkScript: mustHex("76a91438336cea45bafa04c6c1dab1e588c8ce7de3a71b88ac"),
 				Amount:   10,
@@ -852,7 +852,7 @@ func TestExtractPrevInputsFromOps(t *testing.T) {
 	}}
 
 	test := func(t *testing.T, tc *testCase) {
-		gotMap, err := ExtractPrevInputsFromOps(tc.ops, chainParams)
+		gotMap, err := ExtractPrevOutputsFromOps(tc.ops, chainParams)
 		gotErr := err != nil
 		if gotErr != tc.wantErr {
 			t.Fatalf("unexpected error. want=%v, got=%v, err=%v",

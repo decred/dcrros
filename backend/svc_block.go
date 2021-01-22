@@ -20,12 +20,17 @@ import (
 
 var _ rserver.BlockAPIServicer = (*Server)(nil)
 
-func (s *Server) inputsFetcher(ctx context.Context, utxoSet map[wire.OutPoint]*types.PrevInput, inputList ...*wire.OutPoint) (map[wire.OutPoint]*types.PrevInput, error) {
-	res := make(map[wire.OutPoint]*types.PrevInput, len(inputList))
+// prevOutsFetcher fetches information about a set of target utxos specified by
+// their outpoints.
+//
+// Data is fetched from either the passed utxoSet map (if it exists) or from
+// the underlying dcrd instance.
+func (s *Server) prevOutsFetcher(ctx context.Context, utxoSet map[wire.OutPoint]*types.PrevOutput, targets ...*wire.OutPoint) (map[wire.OutPoint]*types.PrevOutput, error) {
+	res := make(map[wire.OutPoint]*types.PrevOutput, len(targets))
 
 	// First, dedupe the needed txs.
 	txs := make(map[chainhash.Hash]*wire.MsgTx)
-	for _, in := range inputList {
+	for _, in := range targets {
 		if prev, ok := utxoSet[*in]; ok {
 			res[*in] = prev
 			continue
@@ -67,7 +72,7 @@ func (s *Server) inputsFetcher(ctx context.Context, utxoSet map[wire.OutPoint]*t
 	}
 
 	// Now build the resulting map.
-	for _, in := range inputList {
+	for _, in := range targets {
 		tx := txs[in.Hash]
 		if tx == nil {
 			// Already got it through the utxoSet.
@@ -78,7 +83,7 @@ func (s *Server) inputsFetcher(ctx context.Context, utxoSet map[wire.OutPoint]*t
 				"tx %s index %d", in.Hash, in.Index)
 		}
 		out := tx.TxOut[in.Index]
-		res[*in] = &types.PrevInput{
+		res[*in] = &types.PrevOutput{
 			PkScript: out.PkScript,
 			Version:  out.Version,
 			Amount:   dcrutil.Amount(out.Value),
@@ -88,9 +93,11 @@ func (s *Server) inputsFetcher(ctx context.Context, utxoSet map[wire.OutPoint]*t
 	return res, nil
 }
 
-func (s *Server) makeInputsFetcher(ctx context.Context, utxoSet map[wire.OutPoint]*types.PrevInput) types.PrevInputsFetcher {
-	return func(inputList ...*wire.OutPoint) (map[wire.OutPoint]*types.PrevInput, error) {
-		return s.inputsFetcher(ctx, utxoSet, inputList...)
+// makePrevOutsFetcher wraps the given context to produce a cancelable function
+// to fetch previous outputs.
+func (s *Server) makePrevOutsFetcher(ctx context.Context, utxoSet map[wire.OutPoint]*types.PrevOutput) types.PrevOutputsFetcher {
+	return func(inputList ...*wire.OutPoint) (map[wire.OutPoint]*types.PrevOutput, error) {
+		return s.prevOutsFetcher(ctx, utxoSet, inputList...)
 	}
 }
 
@@ -121,8 +128,8 @@ func (s *Server) Block(ctx context.Context, req *rtypes.BlockRequest) (*rtypes.B
 		}
 	}
 
-	fetchInputs := s.makeInputsFetcher(ctx, nil)
-	rblock, err := types.WireBlockToRosetta(b, prev, fetchInputs, s.chainParams)
+	fetchPrevOuts := s.makePrevOutsFetcher(ctx, nil)
+	rblock, err := types.WireBlockToRosetta(b, prev, fetchPrevOuts, s.chainParams)
 	if err != nil {
 		return nil, types.RError(err)
 	}

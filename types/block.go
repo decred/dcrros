@@ -29,15 +29,17 @@ func VoteBitsApprovesParent(voteBits uint16) bool {
 	return voteBits&0x01 == 0x01
 }
 
-// PrevInput is the output information needed for a given transaction input.
-type PrevInput struct {
+// PrevOutput is the output information needed about the output spent by some
+// transaction input.
+type PrevOutput struct {
 	PkScript []byte
 	Version  uint16
 	Amount   dcrutil.Amount
 }
 
-// PrevInputsFetcher is used to fetch previous inputs from transactions.
-type PrevInputsFetcher func(...*wire.OutPoint) (map[wire.OutPoint]*PrevInput, error)
+// PrevOutputsFetcher is used to fetch info about outputs that are spent by
+// transaction inputs.
+type PrevOutputsFetcher func(...*wire.OutPoint) (map[wire.OutPoint]*PrevOutput, error)
 
 type Op struct {
 	Tree           int8
@@ -53,7 +55,7 @@ type Op struct {
 	Amount         dcrutil.Amount
 	In             *wire.TxIn
 	Out            *wire.TxOut
-	PrevInput      *PrevInput
+	PrevOutput     *PrevOutput
 }
 
 func (op *Op) ROp() *rtypes.Operation {
@@ -146,7 +148,7 @@ type BlockOpCb = func(op *Op) error
 // - Status
 //
 // The same op is reused across all calls to the callback.
-func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpCb,
+func iterateBlockOpsInTx(op *Op, fetchPrevOuts PrevOutputsFetcher, applyOp BlockOpCb,
 	chainParams *chaincfg.Params) error {
 
 	tx := op.Tx
@@ -169,7 +171,7 @@ func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpC
 		}
 		prevOutpoints = append(prevOutpoints, &in.PreviousOutPoint)
 	}
-	prevInputs, err := fetchInputs(prevOutpoints...)
+	prevOutputs, err := fetchPrevOuts(prevOutpoints...)
 	if err != nil {
 		return err
 	}
@@ -189,21 +191,21 @@ func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpC
 
 			if isTSpend {
 				// For tspends, the first input debits from the
-				// treasury account and there's no PrevInput.
-				op.PrevInput = nil
+				// treasury account and there's no PrevOutput.
+				op.PrevOutput = nil
 				op.AccountVersion = 0
 				op.Account = TreasuryAccountAdddress
 				op.Amount = -dcrutil.Amount(in.ValueIn)
 			} else {
 				// Handle standard inputs.
-				op.PrevInput, ok = prevInputs[in.PreviousOutPoint]
+				op.PrevOutput, ok = prevOutputs[in.PreviousOutPoint]
 				if !ok {
 					return fmt.Errorf("missing prev outpoint %s", in.PreviousOutPoint)
 				}
 
-				op.AccountVersion = op.PrevInput.Version
-				op.Account, err = dcrPkScriptToAccountAddr(op.PrevInput.Version,
-					op.PrevInput.PkScript, chainParams)
+				op.AccountVersion = op.PrevOutput.Version
+				op.Account, err = dcrPkScriptToAccountAddr(op.PrevOutput.Version,
+					op.PrevOutput.PkScript, chainParams)
 				if err != nil {
 					return err
 				}
@@ -213,7 +215,7 @@ func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpC
 					continue
 				}
 
-				op.Amount = -op.PrevInput.Amount
+				op.Amount = -op.PrevOutput.Amount
 			}
 
 			// Fill in op input data.
@@ -239,7 +241,7 @@ func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpC
 	addTxOuts := func() error {
 		// Reset op's input attributes.
 		op.In = nil
-		op.PrevInput = nil
+		op.PrevOutput = nil
 
 		for i, out := range tx.TxOut {
 			if out.Value == 0 {
@@ -317,11 +319,11 @@ func iterateBlockOpsInTx(op *Op, fetchInputs PrevInputsFetcher, applyOp BlockOpC
 // prev is only needed if block disapproves its parent block, in which case
 // transactions in prev are reversed.
 //
-// fetchInputs must be able to fetch any previous output from the blocks.
+// fetchPrevOuts must be able to fetch any previous output from the blocks.
 //
 // The operation passed to applyOp may be reused, so callers are expected to
 // copy its contents if they will ne needed.
-func IterateBlockOps(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher,
+func IterateBlockOps(b, prev *wire.MsgBlock, fetchPrevOuts PrevOutputsFetcher,
 	applyOp BlockOpCb, chainParams *chaincfg.Params) error {
 
 	approvesParent := VoteBitsApprovesParent(b.Header.VoteBits) || b.Header.Height == 0
@@ -343,7 +345,7 @@ func IterateBlockOps(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher,
 			op.TxHash = tx.TxHash()
 			op.TxIndex = i
 			op.OpIndex = 0
-			err := iterateBlockOpsInTx(&op, fetchInputs, applyOp,
+			err := iterateBlockOpsInTx(&op, fetchPrevOuts, applyOp,
 				chainParams)
 			if err != nil {
 				return err
@@ -407,7 +409,7 @@ func txMetaToRosetta(tx *wire.MsgTx, txHash, blockHash *chainhash.Hash) *rtypes.
 // block in rosetta representation. The previous block is needed when the
 // current block disapproved the regular transactions of the previous one, in
 // which case it must be specified or this function errors.
-func WireBlockToRosetta(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher,
+func WireBlockToRosetta(b, prev *wire.MsgBlock, fetchPrevOuts PrevOutputsFetcher,
 	chainParams *chaincfg.Params) (*rtypes.Block, error) {
 
 	approvesParent := VoteBitsApprovesParent(b.Header.VoteBits) || b.Header.Height == 0
@@ -448,7 +450,7 @@ func WireBlockToRosetta(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher,
 	}
 
 	// Build the list of transactions.
-	err := IterateBlockOps(b, prev, fetchInputs, applyOp, chainParams)
+	err := IterateBlockOps(b, prev, fetchPrevOuts, applyOp, chainParams)
 	if err != nil {
 		return nil, err
 	}
@@ -491,7 +493,7 @@ func WireBlockToRosetta(b, prev *wire.MsgBlock, fetchInputs PrevInputsFetcher,
 
 // MempoolTxToRosetta converts a wire tx that is known to be on the mempool to
 // a rosetta tx.
-func MempoolTxToRosetta(tx *wire.MsgTx, fetchInputs PrevInputsFetcher,
+func MempoolTxToRosetta(tx *wire.MsgTx, fetchPrevOuts PrevOutputsFetcher,
 	chainParams *chaincfg.Params) (*rtypes.Transaction, error) {
 
 	txh := tx.TxHash()
@@ -517,7 +519,7 @@ func MempoolTxToRosetta(tx *wire.MsgTx, fetchInputs PrevInputsFetcher,
 		// use a negative txidx.
 		TxIndex: -1,
 	}
-	err := iterateBlockOpsInTx(&op, fetchInputs, applyOp,
+	err := iterateBlockOpsInTx(&op, fetchPrevOuts, applyOp,
 		chainParams)
 	if err != nil {
 		return nil, err
