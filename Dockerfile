@@ -7,19 +7,19 @@
 # See the docs for alternative ways of running this.
 
 # Stage 1: Build the bins in a golang image.
-FROM golang:1.14-buster AS builder
+FROM golang:1.15-buster AS builder
 
 # Build dcrd and include dcrctl as well.
 #
 # TODO: Switch to the tagged 1.6.0 once that is released.
 RUN git clone https://github.com/decred/dcrd
-RUN (cd dcrd && git checkout cee62c352c75b84f303da419c6b8b56d62c2949e)
+RUN (cd dcrd && git checkout release-v1.6.0)
 RUN (cd dcrd && go install .)
 RUN git clone https://github.com/decred/dcrctl
-RUN (cd dcrctl && git checkout 44e17b578ad6a7d3769be4574196867b4c34f4e8)
+RUN (cd dcrctl && git checkout release-v1.6.0)
 RUN (cd dcrctl && go install .)
 RUN git clone https://github.com/decred/dcrros
-RUN (cd dcrros && git checkout aa76a84a19fcda926bd30ea6eaa29815d9b907dd)
+RUN (cd dcrros && git checkout ff6b2ac7d559ea8298743c8893ae831c28c1c569)
 RUN (cd dcrros && go install .)
 
 # Stage 2: Build the final image starting from a cleaner base.
@@ -40,8 +40,8 @@ WORKDIR /data
 
 # Expose dcrros and dcrd ports for mainnet, testnet and simnet. Each line is:
 # 	dcrros    dcrd-p2p  dcrd-rpc
-EXPOSE  9128/tcp  9108/tcp  9109/tcp 
-EXPOSE 19128/tcp 19108/tcp 19109/tcp 
+EXPOSE  9128/tcp  9108/tcp  9109/tcp
+EXPOSE 19128/tcp 19108/tcp 19109/tcp
 EXPOSE 29128/tcp 19556/tcp 18555/tcp
 
 # The main executable for this is dcrros, running dcrd in "embedded" mode:

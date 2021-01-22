@@ -1,9 +1,9 @@
 # This is the _development_ version of the Dockerfile, useful for testing the
-# latest versions of dcrd and dcrros and also used while developing the docker 
+# latest versions of dcrd and dcrros and also used while developing the docker
 # images themselves.
 
 # Stage 1: Build the bins in a golang image.
-FROM golang:1.14-buster AS builder
+FROM golang:1.15-buster AS builder
 
 # Build the latest dcrd and dcrctl. The commented lines allow you to pick
 # a specific version if needed.
@@ -36,8 +36,8 @@ WORKDIR /data
 
 # Expose dcrros and dcrd ports for mainnet, testnet and simnet. Each line is:
 # 	dcrros    dcrd-p2p  dcrd-rpc
-EXPOSE  9128/tcp  9108/tcp  9109/tcp 
-EXPOSE 19128/tcp 19108/tcp 19109/tcp 
+EXPOSE  9128/tcp  9108/tcp  9109/tcp
+EXPOSE 19128/tcp 19108/tcp 19109/tcp
 EXPOSE 29128/tcp 19556/tcp 18555/tcp
 
 # The main executable for this is dcrros, running dcrd in "embedded" mode:
