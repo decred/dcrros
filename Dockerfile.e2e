@@ -1,0 +1,39 @@
+# This is the Dockerfile for the End-to-End (E2E) test suite.
+#
+# The E2E test suite uses dcrd and dcrwallet to setup an extensive simnet, runs
+# both online and offline dcrros instances and performs rosetta-cli's
+# check:data and check:construction tests to assert correct behavior of the
+# code.
+
+# Stage 1: Build the bins in a golang image.
+FROM golang:1.15-buster AS builder
+
+# Build dcrd, dcrwallet, dcrros and include dcrctl as well.
+#
+# Versions for the bins are updated as required by the current master version
+# of dcrros.
+RUN git clone https://github.com/decred/dcrd
+RUN (cd dcrd && git checkout release-v1.6.0 && go install .)
+RUN git clone https://github.com/decred/dcrwallet
+RUN (cd dcrwallet && git checkout release-v1.6.0 && go install .)
+RUN git clone https://github.com/coinbase/rosetta-cli
+RUN (cd rosetta-cli && git checkout v0.6.7 && go install .)
+copy . dcrros
+RUN (cd dcrros && go install .)
+RUN (cd dcrros/internal/e2etest && go install .)
+
+# Stage 2: Build the final image starting from a cleaner base.
+FROM debian:buster
+
+# Copy the previously built bins.
+COPY --from=builder /go/bin/dcrd bin/dcrd
+COPY --from=builder /go/bin/dcrwallet bin/dcrwallet
+COPY --from=builder /go/bin/dcrros bin/dcrros
+COPY --from=builder /go/bin/rosetta-cli bin/rosetta-cli
+COPY --from=builder /go/bin/e2etest bin/e2etest
+
+# According to Rosetta's documentation, all data should be in /data.
+WORKDIR /data
+
+# The main executable for this is the e2etest bin.
+ENTRYPOINT ["e2etest", "-debuglevel=debug", "-appdata=/data"]

@@ -32,6 +32,17 @@ For additional configuration options, including how to run on the test network, 
 
 `dcrros` is currently developed on go version 1.14. It follows the same conventions as other Decred tools, such as [dcrd](https://github.com/decred/dcrd) and [dcrwallet](https://github.com/decred/dcrwallet).
 
+# E2E Testing
+
+An End-to-End test suite, including running the Rosetta CLI's `check:data` and `check:construction` tests is included in [/internal/e2etest](/internal/e2etest). This test suite runs on a local simnet instance that exercises a large number of common on-chain operations found in the Decred chain.
+
+The tests can also be run via Docker by using the included [Dockerfile.e2e](/Dockerfile.e2e):
+
+```shell
+$ docker build --tag dcrros:e2e -f Dockerfile.e2e .
+$ docker run --rm dcrros:e2e
+```
+
 # License
 
 `dcrros` is licensed under the [copyfree](http://copyfree.org) ISC License.
