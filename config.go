@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The Decred developers
+// Copyright (c) 2021 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -55,11 +55,11 @@ func (c chainNetwork) defaultListenPort() string {
 func (c chainNetwork) defaultDcrdRPCConnect() string {
 	switch c {
 	case cnMainNet:
-		return "localhost:9109"
+		return "127.0.0.1:9109"
 	case cnTestNet:
-		return "localhost:19109"
+		return "127.0.0.1:19109"
 	case cnSimNet:
-		return "localhost:19556"
+		return "127.0.0.1:19556"
 	default:
 		panic("unknown chainNetwork")
 	}
@@ -105,7 +105,7 @@ type config struct {
 
 	// Dcrd Connection Options
 
-	DcrdConnect   string `short:"c" long:"dcrdconnect" description:"Network address of the RPC interface of the dcrd node to connect to (default: localhost port 9109, testnet: 19109, simnet: 19556)"`
+	DcrdConnect   string `short:"c" long:"dcrdconnect" description:"Network address of the RPC interface of the dcrd node to connect to (default: 127.0.0.1 port 9109, testnet: 19109, simnet: 19556)"`
 	DcrdCertPath  string `long:"dcrdcertpath" description:"File path location of the dcrd RPC certificate"`
 	DcrdCertBytes string `long:"dcrdcertbytes" description:"The pem-encoded RPC certificate for dcrd"`
 	DcrdUser      string `short:"u" long:"dcrduser" description:"RPC username to authenticate with dcrd"`
@@ -183,6 +183,9 @@ func (c *config) dcrdArgs() []string {
 	}
 	if c.SimNet {
 		args = append(args, "--simnet")
+	}
+	if c.DcrdConnect != "" {
+		args = append(args, "--rpclisten="+c.DcrdConnect)
 	}
 
 	args = append(args, c.DcrdExtraArgs...)
@@ -564,13 +567,6 @@ func loadConfig() (*config, []string, error) {
 			return nil, nil, fmt.Errorf("profile address %s: port "+
 				"must be between 1024 and 65535", cfg.Profile)
 		}
-	}
-
-	// When using --rundcrd the user shouldn't specify a connection option
-	// as we'll specify one for them.
-	if cfg.DcrdConnect != "" && cfg.RunDcrd != "" {
-		return nil, nil, fmt.Errorf("cannot use both --dcrdconnect and " +
-			"--rundcrd at the same time")
 	}
 
 	// Determine the default dcrd connect address based on the selected
