@@ -421,5 +421,53 @@ func TestRosettaErrorIs(t *testing.T) {
 			break
 		}
 	}
+}
+
+// TestRErrorAsError asserts the RErrorAsError function works as expected.
+func TestRErrorAsError(t *testing.T) {
+	tests := []struct {
+		name    string
+		rerr    *rtypes.Error
+		wantErr *Error
+	}{{
+		name:    "nil error",
+		rerr:    nil,
+		wantErr: nil,
+	}, {
+		name: "filled error",
+		rerr: &rtypes.Error{
+			Code:      0xff,
+			Message:   "fooo",
+			Retriable: true,
+		},
+		wantErr: &Error{
+			code:      0xff,
+			msg:       "fooo",
+			retriable: true,
+		},
+	}}
+
+	for _, tc := range tests {
+		tc := tc
+		ok := t.Run(tc.name, func(t *testing.T) {
+			err := RErrorAsError(tc.rerr)
+			if (tc.wantErr == nil) != (err == nil) {
+				t.Fatalf("unexpected error. want=%v got=%v",
+					tc.wantErr, err)
+			}
+			if tc.wantErr == nil {
+				return
+			}
+			gotErr := err.(*Error)
+			if !reflect.DeepEqual(gotErr, tc.wantErr) {
+				t.Fatalf("unexpected error. want=%#v got=#%v",
+					tc.wantErr, gotErr)
+			}
+		})
+
+		if !ok {
+			break
+		}
+	}
 
 }

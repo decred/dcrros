@@ -1,4 +1,4 @@
-// Copyright (c) 2020 The Decred developers
+// Copyright (c) 2021 The Decred developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
@@ -110,7 +110,11 @@ var errorCodeMsgs = map[ErrorCode]string{
 //
 // NOTE: this is part of the standard Go error interface.
 func (err ErrorCode) Error() string {
-	return errorCodeMsgs[err]
+	s := "undefined error code"
+	if msg, ok := errorCodeMsgs[err]; ok {
+		s = msg
+	}
+	return s
 }
 
 // Is returns true if the target error is also an error code, an Error value
@@ -313,6 +317,20 @@ func RError(err error) *rtypes.Error {
 	}
 
 	return ErrUnknown.Msg(err.Error()).RError()
+}
+
+// RErrorAsError converts the given rosetta types.Error into a standard go
+// error.
+func RErrorAsError(rerr *rtypes.Error) error {
+	if rerr == nil {
+		return nil
+	}
+
+	return &Error{
+		code:      ErrorCode(rerr.Code),
+		msg:       rerr.Message,
+		retriable: rerr.Retriable,
+	}
 }
 
 // RosettaErrorIs returns true is the passed Rosetta error value corresponds to
