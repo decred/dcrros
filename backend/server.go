@@ -357,7 +357,7 @@ func (s *Server) Run(ctx context.Context) error {
 	if err := s.waitForDcrdConnection(ctx); err != nil {
 		return err
 	}
-	peerTimeout := 10 * time.Second
+	peerTimeout := 30 * time.Second
 	if s.peerTimeout != 0 {
 		peerTimeout = s.peerTimeout
 	}
