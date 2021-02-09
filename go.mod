@@ -4,7 +4,7 @@ go 1.14
 
 require (
 	decred.org/dcrwallet v1.6.0
-	github.com/coinbase/rosetta-sdk-go v0.6.1
+	github.com/coinbase/rosetta-sdk-go v0.6.8
 	github.com/davecgh/go-spew v1.1.1
 	github.com/decred/dcrd v1.2.1-0.20210121192504-91b84e06447e
 	github.com/decred/dcrd/blockchain/stake/v3 v3.0.0

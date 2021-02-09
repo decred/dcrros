@@ -274,6 +274,7 @@ func TestWaitsForBlockchainSync(t *testing.T) {
 		name             string
 		net              *chaincfg.Params
 		resp             *chainjson.GetBlockChainInfoResult
+		wantError        error
 		wantSynced       bool
 		preprocessBlocks int
 	}
@@ -286,7 +287,8 @@ func TestWaitsForBlockchainSync(t *testing.T) {
 			InitialBlockDownload: true,
 			Blocks:               0,
 		},
-		wantSynced: true,
+		wantError:  nil,
+		wantSynced: false,
 	}, {
 		name: "empty simnet node returns anyway",
 		net:  simnet,
@@ -295,7 +297,8 @@ func TestWaitsForBlockchainSync(t *testing.T) {
 			InitialBlockDownload: true,
 			Blocks:               0,
 		},
-		wantSynced: true,
+		wantError:  nil,
+		wantSynced: false,
 	}, {
 		name: "mainnet node during IBD",
 		net:  mainnet,
@@ -304,33 +307,37 @@ func TestWaitsForBlockchainSync(t *testing.T) {
 			InitialBlockDownload: true,
 			Blocks:               250,
 		},
+		wantError:  context.DeadlineExceeded,
 		wantSynced: false,
 	}, {
-		name: "mainnet node syncing, not IBD flagged",
+		name: "mainnet node downloading blocks, not IBD flagged",
 		net:  mainnet,
 		resp: &chainjson.GetBlockChainInfoResult{
 			SyncHeight:           1000,
 			InitialBlockDownload: false,
 			Blocks:               250,
 		},
+		wantError:  context.DeadlineExceeded,
 		wantSynced: false,
 	}, {
-		name: "mainnet node synced, IBD flagged",
+		name: "mainnet node all blocks, IBD still flagged",
 		net:  mainnet,
 		resp: &chainjson.GetBlockChainInfoResult{
 			SyncHeight:           1000,
 			InitialBlockDownload: true,
 			Blocks:               1000,
 		},
+		wantError:  context.DeadlineExceeded,
 		wantSynced: false,
 	}, {
-		name: "mainnet node synced",
+		name: "mainnet node fetched all blocks",
 		net:  mainnet,
 		resp: &chainjson.GetBlockChainInfoResult{
 			SyncHeight:           1000,
 			InitialBlockDownload: false,
 			Blocks:               1000,
 		},
+		wantError:  nil,
 		wantSynced: true,
 	}, {
 		name: "mainnet node past sync height",
@@ -340,6 +347,7 @@ func TestWaitsForBlockchainSync(t *testing.T) {
 			InitialBlockDownload: false,
 			Blocks:               1001,
 		},
+		wantError:  nil,
 		wantSynced: true,
 	}, {
 		name:             "mainnet node with old db connected to unsynced node",
@@ -350,6 +358,7 @@ func TestWaitsForBlockchainSync(t *testing.T) {
 			InitialBlockDownload: false,
 			Blocks:               2,
 		},
+		wantError:  context.DeadlineExceeded,
 		wantSynced: false,
 	}, {
 		name:             "mainnet node with old db connected to synced node",
@@ -360,6 +369,7 @@ func TestWaitsForBlockchainSync(t *testing.T) {
 			InitialBlockDownload: false,
 			Blocks:               3,
 		},
+		wantError:  nil,
 		wantSynced: true,
 	}}
 
@@ -422,10 +432,9 @@ func TestWaitsForBlockchainSync(t *testing.T) {
 		}
 
 		// Verify result.
-		gotSynced := syncResult == nil
-		if tc.wantSynced != gotSynced {
-			t.Fatalf("unexpected sync result. want=%v got=%v",
-				tc.wantSynced, gotSynced)
+		if !errors.Is(tc.wantError, syncResult) {
+			t.Fatalf("unexpected sync error. want=%v got=%v",
+				tc.wantError, syncResult)
 		}
 
 		// Assert the sync status is the expected one.
@@ -436,13 +445,17 @@ func TestWaitsForBlockchainSync(t *testing.T) {
 			t.Fatalf("unexpected syncStatus.Stage. want=%v got=%v",
 				syncStatusStageBlockchainSync, gotSS.Stage)
 		}
-		if gotSS.CurrentIndex != tc.resp.Blocks {
+		if gotSS.CurrentIndex == nil || *gotSS.CurrentIndex != tc.resp.Blocks {
 			t.Fatalf("unexpected syncStatus.CurrentIndex. want=%d got=%d",
 				tc.resp.Blocks, gotSS.CurrentIndex)
 		}
 		if gotSS.TargetIndex == nil || *gotSS.TargetIndex != tc.resp.SyncHeight {
 			t.Fatalf("unexpected syncStatus.TargetIndex. want=%d got=%v",
 				tc.resp.SyncHeight, gotSS.TargetIndex)
+		}
+		if gotSS.Synced == nil || *gotSS.Synced != tc.wantSynced {
+			t.Fatalf("unexpected syncStatus.Synced. want=%v got=%v",
+				tc.wantSynced, *gotSS.Synced)
 		}
 	}
 

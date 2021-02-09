@@ -502,7 +502,7 @@ func TestSyncStatusDuringPreprocess(t *testing.T) {
 		t.Fatalf("unexpected syncStatus.Stage. want=%v got=%v",
 			syncStatusStageProcessingAccounts, gotSS.Stage)
 	}
-	if gotSS.CurrentIndex != blockHeight {
+	if gotSS.TargetIndex == nil || *gotSS.CurrentIndex != blockHeight {
 		t.Fatalf("unexpected syncStatus.CurrentIndex. want=%d got=%d",
 			blockHeight, gotSS.CurrentIndex)
 	}

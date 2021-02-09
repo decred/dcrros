@@ -28,7 +28,7 @@ import (
 const (
 	// rosettaVersion is the version of the rosetta spec this backend
 	// currently implements.
-	rosettaVersion = "1.4.8"
+	rosettaVersion = "1.4.10"
 )
 
 // DBType defines the available database types.

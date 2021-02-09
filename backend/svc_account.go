@@ -229,7 +229,7 @@ func (s *Server) preProcessAccounts(ctx context.Context) error {
 	targetIndex := chainInfo.Blocks
 	s.mtx.Lock()
 	s.syncStatus.Stage = &syncStatusStageProcessingAccounts
-	s.syncStatus.CurrentIndex = startHeight
+	s.syncStatus.CurrentIndex = &startHeight
 	s.syncStatus.TargetIndex = &targetIndex
 	s.mtx.Unlock()
 
@@ -255,7 +255,8 @@ func (s *Server) preProcessAccounts(ctx context.Context) error {
 
 		// Update the current sync status.
 		s.mtx.Lock()
-		s.syncStatus.CurrentIndex = int64(b.Header.Height)
+		currIndex := int64(b.Header.Height)
+		s.syncStatus.CurrentIndex = &currIndex
 		s.mtx.Unlock()
 
 		lastHeight = int64(b.Header.Height)
