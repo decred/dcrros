@@ -6,7 +6,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go: [1.14, 1.15]
+        go: [1.15, 1.16]
     env:
       GO111MODULE: "on"
     steps:
@@ -21,7 +21,7 @@ jobs:
           path: dcrros
 
       - name: Install Linters
-        run: "curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $(go env GOPATH)/bin v1.32.1"
+        run: "curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b $(go env GOPATH)/bin v1.37.0"
 
       - name: Build
         working-directory: dcrros
