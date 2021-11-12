@@ -7,21 +7,21 @@
 # See the docs for alternative ways of running this.
 
 # Stage 1: Build the bins in a golang image.
-FROM golang:1.15-buster AS builder
+FROM golang:1.17-buster AS builder
 
 # Build dcrd and include dcrctl as well.
 RUN git clone https://github.com/decred/dcrd
-RUN (cd dcrd && git checkout release-v1.6.0)
+RUN (cd dcrd && git checkout release-v1.6.2)
 RUN (cd dcrd && go install .)
 RUN git clone https://github.com/decred/dcrctl
-RUN (cd dcrctl && git checkout release-v1.6.0)
+RUN (cd dcrctl && git checkout release-v1.6.2)
 RUN (cd dcrctl && go install .)
 RUN git clone https://github.com/decred/dcrros
 RUN (cd dcrros && git checkout release-v0.1.0)
 RUN (cd dcrros && go install .)
 
 # Stage 2: Build the final image starting from a cleaner base.
-FROM debian:buster
+FROM ubuntu:latest
 
 # Install ca-certificates so dcrd can reach the network seeders.
 RUN apt-get update

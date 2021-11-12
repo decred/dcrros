@@ -11,25 +11,25 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: 1.15
+          go-version: 1.17
 
       - name: Checkout dcrd
         uses: actions/checkout@v2
         with:
           repository: decred/dcrd
-          ref: release-v1.6.0
+          ref: release-v1.6.2
           path: dcrd
       - name: Checkout dcrwallet
         uses: actions/checkout@v2
         with:
           repository: decred/dcrwallet
-          ref: release-v1.6.0
+          ref: release-v1.6.3
           path: dcrwallet
       - name: Checkout rosetta-cli
         uses: actions/checkout@v2
         with:
           repository: coinbase/rosetta-cli
-          ref: v0.6.7
+          ref: v0.7.2
           path: rosetta-cli
       - name: Checkout dcrros
         uses: actions/checkout@v2
