@@ -141,7 +141,8 @@ func NewServer(cfg *ServerConfig) (*Server, error) {
 	var callMethods []string
 	mempoolCoins := false
 	astr, err := asserter.NewServer(allTypes, histBalance,
-		[]*rtypes.NetworkIdentifier{network}, callMethods, mempoolCoins)
+		[]*rtypes.NetworkIdentifier{network}, callMethods,
+		mempoolCoins, "")
 	if err != nil {
 		return nil, err
 	}

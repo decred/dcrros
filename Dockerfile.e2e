@@ -17,7 +17,7 @@ RUN (cd dcrd && git checkout release-v1.6.0 && go install .)
 RUN git clone https://github.com/decred/dcrwallet
 RUN (cd dcrwallet && git checkout release-v1.6.0 && go install .)
 RUN git clone https://github.com/coinbase/rosetta-cli
-RUN (cd rosetta-cli && git checkout v0.6.7 && go install .)
+RUN (cd rosetta-cli && git checkout v0.7.2 && go install .)
 copy . dcrros
 RUN (cd dcrros && go install .)
 RUN (cd dcrros/internal/e2etest && go install .)
