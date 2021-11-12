@@ -10,8 +10,6 @@
 FROM golang:1.15-buster AS builder
 
 # Build dcrd and include dcrctl as well.
-#
-# TODO: Switch to the tagged 1.6.0 once that is released.
 RUN git clone https://github.com/decred/dcrd
 RUN (cd dcrd && git checkout release-v1.6.0)
 RUN (cd dcrd && go install .)
@@ -19,7 +17,7 @@ RUN git clone https://github.com/decred/dcrctl
 RUN (cd dcrctl && git checkout release-v1.6.0)
 RUN (cd dcrctl && go install .)
 RUN git clone https://github.com/decred/dcrros
-RUN (cd dcrros && git checkout ff6b2ac7d559ea8298743c8893ae831c28c1c569)
+RUN (cd dcrros && git checkout release-v0.1.0)
 RUN (cd dcrros && go install .)
 
 # Stage 2: Build the final image starting from a cleaner base.
