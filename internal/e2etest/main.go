@@ -27,7 +27,7 @@ var (
 
 	debugLevel = flag.String("debuglevel", "info", "logging level. Most common: warn,info,debug")
 	appData    = flag.String("appdata", "", "path for root data dir. Use a temp one if empty")
-	dbType     = flag.String("dbtype", "mem", "dbtype to use for dcrros tests")
+	dbType     = flag.String("dbtype", "badger", "dbtype to use for dcrros tests")
 )
 
 func _main() error {
