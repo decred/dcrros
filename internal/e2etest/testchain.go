@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"decred.org/dcrros/types"
-	walletjson "decred.org/dcrwallet/rpc/jsonrpc/types"
-	"github.com/decred/dcrd/blockchain/stake/v3"
+	walletjson "decred.org/dcrwallet/v2/rpc/jsonrpc/types"
+	"github.com/decred/dcrd/blockchain/stake/v4"
 	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/dcrutil/v3"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
-	"github.com/decred/dcrd/txscript/v3"
+	"github.com/decred/dcrd/dcrutil/v4"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
+	"github.com/decred/dcrd/txscript/v4/stdscript"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -95,44 +95,120 @@ func isMined(ctx context.Context, miner *dcrdProc, txh string) (bool, error) {
 	return mined, nil
 }
 
-func isTicketMissed(ctx context.Context, miner *dcrdProc, wallet *dcrwProc, ticket string, mine bool) error {
-	foundMissedTicket := false
-	for i := 0; !foundMissedTicket && i < int(chainParams.TicketExpiry); i++ {
-		missedTickets, err := miner.c.MissedTickets(ctx)
+// ensureTicketRevoked mines blocks until the given ticket is spent and then
+// verifies the spending tx is a revocation. This assumes the autorevoke agenda
+// has passed.
+func ensureTicketRevoked(ctx context.Context, miner *dcrdProc, wallet *dcrwProc,
+	ticket *chainhash.Hash, mine bool) error {
+
+	// First ensure the ticket hasn't been spent yet.
+	res, err := miner.c.GetTxOut(ctx, ticket, 0, 0, false)
+	if err != nil {
+		return err
+	}
+	if res == nil {
+		log.Debugf("Ticket %s already spent. Checking to see if it's "+
+			"a revocation", ticket)
+
+		// Ticket already spent, figure out if it was by a revocation.
+		// Note: This is a crappy way of finding this out (iterating
+		// between when the ticket was mined to current tip).
+
+		// Find out the block the ticket was mined.
+		tx, err := miner.c.GetRawTransactionVerbose(ctx, ticket)
 		if err != nil {
 			return err
 		}
-		for _, txh := range missedTickets {
-			if txh.String() == ticket {
-				foundMissedTicket = true
-				break
-			}
-		}
 
-		if !mine {
-			break
-		}
-
-		if err := mineAndSyncWallet(ctx, miner, wallet, 10); err != nil {
+		_, tipHeight, err := miner.c.GetBestBlock(ctx)
+		if err != nil {
 			return err
 		}
+
+		// Search all blocks from then until the tip.
+		for i := tx.BlockHeight; i <= tipHeight; i++ {
+			bh, err := miner.c.GetBlockHash(ctx, i)
+			if err != nil {
+				return err
+			}
+			block, err := miner.c.GetBlock(ctx, bh)
+			if err != nil {
+				return err
+			}
+			for _, stx := range block.STransactions {
+				if !stake.IsSSRtx(stx, true) {
+					continue
+				}
+
+				if stx.TxIn[0].PreviousOutPoint.Hash == *ticket {
+					revocationTx = stx
+					return nil
+				}
+			}
+
+		}
+	}
+	log.Debugf("Ticket %s unspent. Mining %d until revoked", ticket,
+		chainParams.TicketExpiry)
+
+	for i := 0; i < int(chainParams.TicketExpiry+1); i++ {
+		// Mine a block.
+		if err := mineAndSyncWallet(ctx, miner, wallet, 1); err != nil {
+			return err
+		}
+
+		// See if ticket submission was spent.
+		res, err := miner.c.GetTxOut(ctx, ticket, 0, 0, false)
+		if err != nil {
+			return err
+		}
+		if res != nil {
+			// Not yet.
+			continue
+		}
+
+		lastBlockHash, lastBlockHeight, err := miner.c.GetBestBlock(ctx)
+		if err != nil {
+			return err
+		}
+		log.Debugf("Found ticket spent at height %d (%s)", lastBlockHeight,
+			lastBlockHash)
+
+		// Mine an additional block (because the revocation might be in
+		// the mempool).
+		if err := mineAndSyncWallet(ctx, miner, wallet, 1); err != nil {
+			return err
+		}
+
+		// Ticket spent! Find the revocation in the last block.
+		lastBlockHash, _, err = miner.c.GetBestBlock(ctx)
+		if err != nil {
+			return err
+		}
+		lastBlock, err := miner.c.GetBlock(ctx, lastBlockHash)
+		if err != nil {
+			return err
+		}
+		for _, stx := range lastBlock.STransactions {
+			if !stake.IsSSRtx(stx, true) {
+				continue
+			}
+
+			if stx.TxIn[0].PreviousOutPoint.Hash == *ticket {
+				return nil
+			}
+		}
+		return fmt.Errorf("ticket %s was not revoked after being spent", ticket)
 	}
 
-	if !foundMissedTicket {
-		return fmt.Errorf("ticket %s was not missed", ticket)
-	}
-	return nil
+	return fmt.Errorf("ticket %s was not revoked", ticket)
 }
 
 func addrAndAmountFromTx(tx *wire.MsgTx, out int) (string, dcrutil.Amount, error) {
 	txout := tx.TxOut[out]
 
-	_, addrs, _, err := txscript.ExtractPkScriptAddrs(0, txout.PkScript, chainParams, true)
-	if err != nil {
-		return "", 0, err
-	}
-
-	if len(addrs) != 1 {
+	typ, addrs := stdscript.ExtractAddrs(0, txout.PkScript, chainParams)
+	if typ == stdscript.STNonStandard || len(addrs) != 1 {
 		return "", 0, fmt.Errorf("no addresses in the given pkscript")
 	}
 
@@ -241,7 +317,7 @@ func genTestChain(ctx context.Context, miner *dcrdProc, wallet *dcrwProc) error 
 	if err != nil {
 		return err
 	}
-	nonVotingTicketHash := tickets[0].String()
+	nonVotingTicketHash := tickets[0]
 
 	// Mine past SVH.
 	_, curHeight, err := miner.c.GetBestBlock(ctx)
@@ -301,7 +377,7 @@ func genTestChain(ctx context.Context, miner *dcrdProc, wallet *dcrwProc) error 
 	if minedTadd, err := isMined(ctx, miner, taddTxh); !minedTadd || err != nil {
 		return fmt.Errorf("tadd was not mined (err=%v)", err)
 	}
-	if mined, err := isMined(ctx, miner, nonVotingTicketHash); !mined || err != nil {
+	if mined, err := isMined(ctx, miner, nonVotingTicketHash.String()); !mined || err != nil {
 		return fmt.Errorf("non-voting ticket was not mined (err=%v)", err)
 	}
 	if mined, err := isMined(ctx, miner, multisigTxh); !mined || err != nil {
@@ -314,11 +390,12 @@ func genTestChain(ctx context.Context, miner *dcrdProc, wallet *dcrwProc) error 
 		return fmt.Errorf("multisig redeem tx was not mined (err=%v)", err)
 	}
 
-	// Ensure non-voting ticket is missed.
-	if err := isTicketMissed(ctx, miner, wallet, nonVotingTicketHash, true); err != nil {
+	// Ensure non-voting ticket is revoked.
+	log.Debugf("Attempting to mine ticket until revoked: %s", nonVotingTicketHash)
+	if err := ensureTicketRevoked(ctx, miner, wallet, nonVotingTicketHash, true); err != nil {
 		return err
 	}
-	log.Debugf("Ticket %s was missed", nonVotingTicketHash)
+	log.Debugf("Ticket %s was revoked", nonVotingTicketHash)
 
 	// Ensure there's at least one ticket in the last test block. We mine
 	// one block after sending this PurchaseTicket request in order to mine
@@ -343,17 +420,6 @@ func genTestChain(ctx context.Context, miner *dcrdProc, wallet *dcrwProc) error 
 		return err
 	}
 
-	// Revoke the ticket by importing the key and issuing a revoke.
-	if err := wallet.importPrivKey(ctx, nonVotingPrivKey); err != nil {
-		return err
-	}
-	if err := wallet.rescanWallet(ctx); err != nil {
-		return err
-	}
-	if err := wallet.c.RevokeTickets(ctx); err != nil {
-		return err
-	}
-
 	// Mine the last test block.
 	err = miner.c.RegenTemplate(ctx)
 	if err != nil {
@@ -363,11 +429,6 @@ func genTestChain(ctx context.Context, miner *dcrdProc, wallet *dcrwProc) error 
 	if _, err := miner.mine(ctx, 1); err != nil {
 		return err
 	}
-	if err := isTicketMissed(ctx, miner, wallet, nonVotingTicketHash, false); err == nil {
-		return fmt.Errorf("ticket %s still listed as missed", nonVotingTicketHash)
-	}
-	log.Debugf("Revoked ticket %s", nonVotingTicketHash)
-
 	// Send coins that will remain in the mempool.
 	err = wallet.sendToAddr(ctx, targetAddr, 5e8)
 	if err != nil {
@@ -448,33 +509,23 @@ func checkTestChain(ctx context.Context, dcrros *dcrrosProc, miner *dcrdProc, wa
 		return err
 	}
 
-	// Find the revocation tx in the block, then verify the balance for the
-	// account in dcrros matches the expected one.
-	foundRevocation := false
-	for _, tx := range lastBlock.STransactions {
-		if !stake.IsSSRtx(tx) {
-			continue
-		}
-
-		foundRevocation = true
-		var addr string
-		addr, wantBalance, err = addrAndAmountFromTx(tx, 0)
-		if err != nil {
-			return err
-		}
-
-		gotBalance, err = dcrros.addrBalance(ctx, addr)
-		if err != nil {
-			return err
-		}
-		if gotBalance != wantBalance {
-			return fmt.Errorf("unexpected revocation balance. want=%s got=%s",
-				wantBalance, gotBalance)
-		}
-		break
-	}
-	if !foundRevocation {
+	// Verify the balance for the account of a revoked ticket.
+	if revocationTx == nil {
 		return fmt.Errorf("could not find revocation in last block")
+	}
+	var addr string
+	addr, wantBalance, err = addrAndAmountFromTx(revocationTx, 0)
+	if err != nil {
+		return err
+	}
+
+	gotBalance, err = dcrros.addrBalance(ctx, addr)
+	if err != nil {
+		return err
+	}
+	if gotBalance != wantBalance {
+		return fmt.Errorf("unexpected revocation balance. want=%s got=%s",
+			wantBalance, gotBalance)
 	}
 
 	// Ensure the balance for the ticket that was revoked is zeroed.

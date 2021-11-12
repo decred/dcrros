@@ -18,13 +18,13 @@ import (
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
-	"github.com/decred/dcrd/dcrec"
-	"github.com/decred/dcrd/dcrec/secp256k1/v3"
-	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
-	"github.com/decred/dcrd/dcrutil/v3"
-	"github.com/decred/dcrd/rpcclient/v6"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
+	"github.com/decred/dcrd/dcrutil/v4"
+	"github.com/decred/dcrd/rpcclient/v7"
 	"github.com/decred/dcrd/rpctest"
-	"github.com/decred/dcrd/txscript/v3"
+	"github.com/decred/dcrd/txscript/v4"
+	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/wire"
 	"github.com/stretchr/testify/require"
 )
@@ -141,15 +141,11 @@ func testSimnetBalances(t *testing.T, db backenddb.DB) {
 	privKey := secp256k1.NewPrivateKey(new(secp256k1.ModNScalar).SetInt(1))
 	pubKey := privKey.PubKey().SerializeCompressed()
 	pubKeyHash := dcrutil.Hash160(pubKey)
-	p2pkhAddr, err := dcrutil.NewAddressPubKeyHash(pubKeyHash, net,
-		dcrec.STEcdsaSecp256k1)
+	p2pkhAddr, err := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(pubKeyHash, net)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p2pkhScript, err := txscript.PayToAddrScript(p2pkhAddr)
-	if err != nil {
-		t.Fatal(err)
-	}
+	scriptVersion, p2pkhScript := p2pkhAddr.PaymentScript()
 
 	// Helper to assert the balance of the the given address is correct at
 	// tip.
@@ -157,9 +153,9 @@ func testSimnetBalances(t *testing.T, db backenddb.DB) {
 		t.Helper()
 
 		accountId := &rtypes.AccountIdentifier{
-			Address: p2pkhAddr.Address(),
+			Address: p2pkhAddr.String(),
 			Metadata: map[string]interface{}{
-				"script_version": uint16(0),
+				"script_version": scriptVersion,
 			},
 		}
 		reqBalance := &rtypes.AccountBalanceRequest{
@@ -206,7 +202,7 @@ func testSimnetBalances(t *testing.T, db backenddb.DB) {
 
 		req := &rtypes.AccountCoinsRequest{
 			AccountIdentifier: &rtypes.AccountIdentifier{
-				Address: p2pkhAddr.Address(),
+				Address: p2pkhAddr.String(),
 				Metadata: map[string]interface{}{
 					"script_version": uint16(0),
 				},
@@ -429,13 +425,12 @@ func testSimnetConstructionInteraction(t *testing.T, db backenddb.DB) {
 	privKeySecp256k1 := secp256k1.PrivKeyFromBytes(privKeyBytes)
 	pubKeySecp256k1 := privKeySecp256k1.PubKey()
 	pubKeySecp256k1Hash := dcrutil.Hash160(pubKeySecp256k1.SerializeCompressed())
-	addrEcdsaSecp256k1, err := dcrutil.NewAddressPubKeyHash(pubKeySecp256k1Hash,
-		params, dcrec.STEcdsaSecp256k1)
+	addrEcdsaSecp256k1, err := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(pubKeySecp256k1Hash,
+		params)
 	require.NoError(t, err)
-	pksEcdsaSecp256k1, err := txscript.PayToAddrScript(addrEcdsaSecp256k1)
-	require.NoError(t, err)
-	addrSpend, err := dcrutil.NewAddressPubKeyHash([]byte{19: 0x00},
-		params, dcrec.STEcdsaSecp256k1)
+	scriptVersion, pksEcdsaSecp256k1 := addrEcdsaSecp256k1.PaymentScript()
+	addrSpend, err := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0([]byte{19: 0x00},
+		params)
 	require.NoError(t, err)
 
 	// Helper to assert the balance of the the given address is correct at
@@ -446,7 +441,7 @@ func testSimnetConstructionInteraction(t *testing.T, db backenddb.DB) {
 		accountId := &rtypes.AccountIdentifier{
 			Address: addr,
 			Metadata: map[string]interface{}{
-				"script_version": uint16(0),
+				"script_version": scriptVersion,
 			},
 		}
 		reqBalance := &rtypes.AccountBalanceRequest{
@@ -603,7 +598,7 @@ func testSimnetConstructionInteraction(t *testing.T, db backenddb.DB) {
 		Type:   "credit",
 		Amount: types.DcrAmountToRosetta(dcrutil.Amount(spendAmt)),
 		Account: &rtypes.AccountIdentifier{
-			Address: addrSpend.Address(),
+			Address: addrSpend.String(),
 			Metadata: map[string]interface{}{
 				"script_version": uint16(0),
 			},
@@ -721,7 +716,7 @@ func testSimnetConstructionInteraction(t *testing.T, db backenddb.DB) {
 	}
 
 	// Assert the account balance is correct.
-	assertTipBalance(addrEcdsaSecp256k1.Address(), coinAmt-spendAmt-fee)
+	assertTipBalance(addrEcdsaSecp256k1.String(), coinAmt-spendAmt-fee)
 }
 
 // TestSimnetConstructionInteraction tests a full interaction of the
@@ -733,4 +728,9 @@ func TestSimnetConstructionInteraction(t *testing.T) {
 	}
 
 	testDbInstances(t, true, testSimnetConstructionInteraction)
+}
+
+func TestMain(m *testing.M) {
+	rpctest.SetPathToDCRD("dcrd")
+	os.Exit(m.Run())
 }

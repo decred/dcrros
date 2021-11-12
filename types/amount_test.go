@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
-	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/dcrutil/v4"
 )
 
 // TestDcrAmtToRosetta tests that converting a dcrutil.Amount to a Rosetta and

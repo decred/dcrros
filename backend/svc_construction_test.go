@@ -19,11 +19,13 @@ import (
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
-	"github.com/decred/dcrd/dcrec/secp256k1/v3"
-	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
-	"github.com/decred/dcrd/dcrjson/v3"
-	"github.com/decred/dcrd/dcrutil/v3"
-	"github.com/decred/dcrd/txscript/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
+	"github.com/decred/dcrd/dcrjson/v4"
+	"github.com/decred/dcrd/dcrutil/v4"
+	"github.com/decred/dcrd/txscript/v4"
+	"github.com/decred/dcrd/txscript/v4/sign"
+	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/wire"
 	"github.com/stretchr/testify/require"
 )
@@ -1047,7 +1049,7 @@ func TestConstructionParseEndpoint(t *testing.T) {
 			// Copy the tx so we can modify the sigscript.
 			tx = tx.Copy()
 			for i := 0; i < len(tx.TxIn); i++ {
-				sigScript, err := txscript.SignatureScript(
+				sigScript, err := sign.SignatureScript(
 					tx, i, mustHex(pksEcdsa),
 					txscript.SigHashAll, privKey,
 					dcrec.STEcdsaSecp256k1, true)
@@ -1144,8 +1146,7 @@ func TestConstructionCombine(t *testing.T) {
 	privKey := mustHex("c387ce35ba8e5d6a566f76c2cf5b055b3a01fe9fd5e5856e93aca8f6d3405696")
 	pubKey := mustHex("0367c9d81503f8f2e5dcadce43f199073d485fd422866d7638af5a1d4134a9c429")
 	addrEcdsa := mustAddr("RsFRVNutxrodAcBuCLMNstc1XU1SMTWyqNo", params)
-	pksEcdsa, err := txscript.PayToAddrScript(addrEcdsa)
-	require.NoError(t, err)
+	_, pksEcdsa := addrEcdsa.PaymentScript()
 	expiry := uint32(2000)
 	locktime := uint32(3000)
 	version := uint16(3)
@@ -1538,8 +1539,8 @@ func TestConstructionInteraction(t *testing.T) {
 	privKeySecp256k1 := secp256k1.PrivKeyFromBytes(privKeyBytes)
 	pubKeySecp256k1 := privKeySecp256k1.PubKey()
 	pubKeySecp256k1Hash := dcrutil.Hash160(pubKeySecp256k1.SerializeCompressed())
-	addrEcdsaSecp256k1, err := dcrutil.NewAddressPubKeyHash(pubKeySecp256k1Hash,
-		params, dcrec.STEcdsaSecp256k1)
+	addrEcdsaSecp256k1, err := stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(pubKeySecp256k1Hash,
+		params)
 	require.NoError(t, err)
 	scriptFlags := txscript.ScriptDiscourageUpgradableNops |
 		txscript.ScriptVerifyCheckLockTimeVerify |
@@ -1551,17 +1552,15 @@ func TestConstructionInteraction(t *testing.T) {
 	// Generate txs in the mock chain that we can spend from and keep track
 	// of outputs that will be spent. This tx only exists in the chain that
 	// is online to receive blocks.
-	pksEcdsaSecp256k1, err := txscript.PayToAddrScript(addrEcdsaSecp256k1)
-	require.NoError(t, err)
+	scriptVersion, pksEcdsaSecp256k1 := addrEcdsaSecp256k1.PaymentScript()
 	outpointEcdsaSecp256k1 := wire.OutPoint{
 		Hash:  chainOnline.addSudoTx(coinAmt, pksEcdsaSecp256k1), // Tx needs to exist in the chain.
 		Index: 0,
 	}
-	scriptVersion0 := uint16(0)
 	prevOuts := map[wire.OutPoint]wire.TxOut{
 		outpointEcdsaSecp256k1: {
 			Value:    coinAmt,
-			Version:  scriptVersion0,
+			Version:  scriptVersion,
 			PkScript: pksEcdsaSecp256k1,
 		},
 	}
@@ -1589,7 +1588,7 @@ func TestConstructionInteraction(t *testing.T) {
 			CurveType: rtypes.Secp256k1,
 		},
 		Metadata: map[string]interface{}{
-			"script_version": scriptVersion0,
+			"script_version": scriptVersion,
 			"algo":           "ecdsa",
 		},
 	}

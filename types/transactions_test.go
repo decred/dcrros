@@ -8,10 +8,10 @@ import (
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
-	"github.com/decred/dcrd/dcrec/secp256k1/v3"
-	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
-	"github.com/decred/dcrd/dcrutil/v3"
-	"github.com/decred/dcrd/txscript/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
+	"github.com/decred/dcrd/txscript/v4"
+	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/wire"
 	"github.com/stretchr/testify/require"
 )
@@ -485,8 +485,8 @@ func TestExtractSignPayloads(t *testing.T) {
 			continue
 		}
 
-		addr, _ := dcrutil.DecodeAddress(tc.op.Account.Address, chainParams)
-		if _, ok := addr.(*dcrutil.AddressPubKeyHash); !ok {
+		addr, _ := stdaddr.DecodeAddress(tc.op.Account.Address, chainParams)
+		if _, ok := addr.(*stdaddr.AddressPubKeyHashEcdsaSecp256k1V0); !ok {
 			// Anything other than an AddresPubKeyHash (including
 			// decoding errors) doesn't currently generate a
 			// signing payload.
@@ -495,7 +495,7 @@ func TestExtractSignPayloads(t *testing.T) {
 		}
 		sigType := rtypes.Ecdsa
 
-		pkScript, _ := txscript.PayToAddrScript(addr)
+		_, pkScript := addr.PaymentScript()
 		sigHash, _ := txscript.CalcSignatureHash(pkScript, sigHashType,
 			tx, inIdx, nil)
 
@@ -505,9 +505,9 @@ func TestExtractSignPayloads(t *testing.T) {
 		}
 
 		pay := payloads[pidx]
-		if pay.AccountIdentifier.Address != addr.Address() {
+		if pay.AccountIdentifier.Address != addr.String() {
 			t.Fatalf("tc %d unexpected address. want=%s got=%s",
-				tci, addr.Address(), pay.AccountIdentifier.Address)
+				tci, addr.String(), pay.AccountIdentifier.Address)
 		}
 
 		if !bytes.Equal(pay.Bytes, sigHash) {

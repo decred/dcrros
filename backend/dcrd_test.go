@@ -16,7 +16,7 @@ import (
 	"decred.org/dcrros/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -71,84 +71,89 @@ func TestCheckDcrd(t *testing.T) {
 			"dcrd": {},
 		},
 		wantValid: false,
-	}, {
-		name: "too low minor version",
-		bcinfo: &chainjson.GetBlockChainInfoResult{
-			Chain: "simnet",
-		},
-		info: &chainjson.InfoChainResult{
-			TxIndex: true,
-		},
-		version: map[string]chainjson.VersionResult{
-			"dcrdjsonrpcapi": {Major: wantJsonRpcMajor, Minor: wantJsonRpcMinor - 1},
-			"dcrd":           {},
-		},
-		wantValid: false,
-	}, {
-		name: "too low major version",
-		bcinfo: &chainjson.GetBlockChainInfoResult{
-			Chain: "simnet",
-		},
-		info: &chainjson.InfoChainResult{
-			TxIndex: true,
-		},
-		version: map[string]chainjson.VersionResult{
-			"dcrdjsonrpcapi": {Major: wantJsonRpcMajor - 1, Minor: wantJsonRpcMinor},
-			"dcrd":           {},
-		},
-		wantValid: false,
-	}, {
-		name: "too high major version",
-		bcinfo: &chainjson.GetBlockChainInfoResult{
-			Chain: "simnet",
-		},
-		info: &chainjson.InfoChainResult{
-			TxIndex: true,
-		},
-		version: map[string]chainjson.VersionResult{
-			"dcrdjsonrpcapi": {Major: wantJsonRpcMajor + 1, Minor: wantJsonRpcMinor},
-			"dcrd":           {},
-		},
-		wantValid: false,
-	}, {
-		name: "version reply without 'dcrd' version",
-		bcinfo: &chainjson.GetBlockChainInfoResult{
-			Chain: "simnet",
-		},
-		info: &chainjson.InfoChainResult{
-			TxIndex: true,
-		},
-		version: map[string]chainjson.VersionResult{
-			"dcrdjsonrpcapi": {Major: wantJsonRpcMajor, Minor: wantJsonRpcMinor},
-		},
-		wantValid: false,
-	}, {
-		name: "all checks pass",
-		bcinfo: &chainjson.GetBlockChainInfoResult{
-			Chain: "simnet",
-		},
-		info: &chainjson.InfoChainResult{
-			TxIndex: true,
-		},
-		version: map[string]chainjson.VersionResult{
-			"dcrdjsonrpcapi": {Major: wantJsonRpcMajor, Minor: wantJsonRpcMinor},
-			"dcrd":           {},
-		},
-		wantValid: true,
-	}, {
-		name: "minor version increased",
-		bcinfo: &chainjson.GetBlockChainInfoResult{
-			Chain: "simnet",
-		},
-		info: &chainjson.InfoChainResult{
-			TxIndex: true,
-		},
-		version: map[string]chainjson.VersionResult{
-			"dcrdjsonrpcapi": {Major: wantJsonRpcMajor, Minor: wantJsonRpcMinor + 1},
-			"dcrd":           {},
-		},
-		wantValid: true,
-	}}
+	},
+		// Commented out because the current minor version is 0.
+		/*
+			{
+				name: "too low minor version",
+				bcinfo: &chainjson.GetBlockChainInfoResult{
+					Chain: "simnet",
+				},
+				info: &chainjson.InfoChainResult{
+					TxIndex: true,
+				},
+				version: map[string]chainjson.VersionResult{
+					"dcrdjsonrpcapi": {Major: wantJsonRpcMajor, Minor: wantJsonRpcMinor - 1},
+					"dcrd":           {},
+				},
+				wantValid: false,
+			},
+		*/
+		{
+			name: "too low major version",
+			bcinfo: &chainjson.GetBlockChainInfoResult{
+				Chain: "simnet",
+			},
+			info: &chainjson.InfoChainResult{
+				TxIndex: true,
+			},
+			version: map[string]chainjson.VersionResult{
+				"dcrdjsonrpcapi": {Major: wantJsonRpcMajor - 1, Minor: wantJsonRpcMinor},
+				"dcrd":           {},
+			},
+			wantValid: false,
+		}, {
+			name: "too high major version",
+			bcinfo: &chainjson.GetBlockChainInfoResult{
+				Chain: "simnet",
+			},
+			info: &chainjson.InfoChainResult{
+				TxIndex: true,
+			},
+			version: map[string]chainjson.VersionResult{
+				"dcrdjsonrpcapi": {Major: wantJsonRpcMajor + 1, Minor: wantJsonRpcMinor},
+				"dcrd":           {},
+			},
+			wantValid: false,
+		}, {
+			name: "version reply without 'dcrd' version",
+			bcinfo: &chainjson.GetBlockChainInfoResult{
+				Chain: "simnet",
+			},
+			info: &chainjson.InfoChainResult{
+				TxIndex: true,
+			},
+			version: map[string]chainjson.VersionResult{
+				"dcrdjsonrpcapi": {Major: wantJsonRpcMajor, Minor: wantJsonRpcMinor},
+			},
+			wantValid: false,
+		}, {
+			name: "all checks pass",
+			bcinfo: &chainjson.GetBlockChainInfoResult{
+				Chain: "simnet",
+			},
+			info: &chainjson.InfoChainResult{
+				TxIndex: true,
+			},
+			version: map[string]chainjson.VersionResult{
+				"dcrdjsonrpcapi": {Major: wantJsonRpcMajor, Minor: wantJsonRpcMinor},
+				"dcrd":           {},
+			},
+			wantValid: true,
+		}, {
+			name: "minor version increased",
+			bcinfo: &chainjson.GetBlockChainInfoResult{
+				Chain: "simnet",
+			},
+			info: &chainjson.InfoChainResult{
+				TxIndex: true,
+			},
+			version: map[string]chainjson.VersionResult{
+				"dcrdjsonrpcapi": {Major: wantJsonRpcMajor, Minor: wantJsonRpcMinor + 1},
+				"dcrd":           {},
+			},
+			wantValid: true,
+		}}
 
 	// test executes a specific test case.
 	test := func(t *testing.T, tc *testCase) {

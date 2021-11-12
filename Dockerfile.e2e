@@ -13,9 +13,9 @@ FROM golang:1.17-buster AS builder
 # Versions for the bins are updated as required by the current master version
 # of dcrros.
 RUN git clone https://github.com/decred/dcrd
-RUN (cd dcrd && git checkout release-v1.6.2 && go install .)
+RUN (cd dcrd && git checkout release-v1.7.0 && go install .)
 RUN git clone https://github.com/decred/dcrwallet
-RUN (cd dcrwallet && git checkout release-v1.6.3 && go install .)
+RUN (cd dcrwallet && git checkout release-v1.7.0 && go install .)
 RUN git clone https://github.com/coinbase/rosetta-cli
 RUN (cd rosetta-cli && git checkout v0.7.2 && go install .)
 copy . dcrros

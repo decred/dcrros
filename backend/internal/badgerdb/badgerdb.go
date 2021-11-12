@@ -12,7 +12,7 @@ import (
 
 	"decred.org/dcrros/backend/backenddb"
 	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/wire"
 	"github.com/dgraph-io/badger/v2"
 )

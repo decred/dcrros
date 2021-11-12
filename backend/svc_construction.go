@@ -17,9 +17,10 @@ import (
 	"decred.org/dcrros/types"
 	rserver "github.com/coinbase/rosetta-sdk-go/server"
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
-	"github.com/decred/dcrd/dcrec"
-	"github.com/decred/dcrd/dcrjson/v3"
-	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/decred/dcrd/dcrjson/v4"
+	"github.com/decred/dcrd/dcrutil/v4"
+	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -57,7 +58,7 @@ var _ rserver.ConstructionAPIServicer = (*Server)(nil)
 func (s *Server) ConstructionDerive(ctx context.Context,
 	req *rtypes.ConstructionDeriveRequest) (*rtypes.ConstructionDeriveResponse, *rtypes.Error) {
 
-	var addr dcrutil.Address
+	var addr stdaddr.Address
 
 	// Future proof this api endpoint by requiring a version metadata. This
 	// ensures that once we move to new address formats, an old dcrros will
@@ -86,34 +87,34 @@ func (s *Server) ConstructionDerive(ctx context.Context,
 			return nil, types.ErrInvalidSecp256k1PubKey.RError()
 		}
 
-		// Ensure the serialized pubkey is in compressed format. We
-		// otherwise assume the caller has specified a valid public
-		// key.
+		// Ensure the serialized pubkey is in compressed format.
 		switch req.PublicKey.Bytes[0] {
 		case 0x02, 0x03:
 		default:
 			return nil, types.ErrNotCompressedSecp256k1Key.RError()
 		}
 
-		var algo dcrec.SignatureType
+		// Ensure it is a valid key.
+		_, err := secp256k1.ParsePubKey(req.PublicKey.Bytes)
+		if err != nil {
+			return nil, types.ErrInvalidSecp256k1PubKey.RError()
+		}
+
+		pkHash := dcrutil.Hash160(req.PublicKey.Bytes)
 		switch req.Metadata["algo"] {
 		case "schnorr":
-			algo = dcrec.STSchnorrSecp256k1
+			addr, err = stdaddr.NewAddressPubKeyHashSchnorrSecp256k1V0(pkHash, s.chainParams)
 		case "ecdsa", nil:
-			algo = dcrec.STEcdsaSecp256k1
+			addr, err = stdaddr.NewAddressPubKeyHashEcdsaSecp256k1V0(pkHash, s.chainParams)
 		default:
 			return nil, types.ErrUnsupportedAddressAlgo.RError()
 		}
 
-		// Hash the public key and create the appropriate address.
-		pkHash := dcrutil.Hash160(req.PublicKey.Bytes)
-		var err error
-		addr, err = dcrutil.NewAddressPubKeyHash(pkHash, s.chainParams, algo)
 		if err != nil {
-			// Shouldn't really happen on the current version of
-			// the dcrutil.API since the arguments are correct.
-			return nil, types.ErrInvalidSecp256k1PubKey.
-				Msgf("NewAddrPubKeyHash error: %v", err).RError()
+			// Shouldn't really happen given we validate the
+			// preconditions to creating the address, but double
+			// check anyway.
+			return nil, types.RError(err)
 		}
 	default:
 		return nil, types.ErrUnsupportedCurveType.RError()
@@ -121,7 +122,7 @@ func (s *Server) ConstructionDerive(ctx context.Context,
 
 	return &rtypes.ConstructionDeriveResponse{
 		AccountIdentifier: &rtypes.AccountIdentifier{
-			Address: addr.Address(),
+			Address: addr.String(),
 			Metadata: map[string]interface{}{
 				"script_version": version,
 			},

@@ -18,7 +18,7 @@ import (
 	"decred.org/dcrros/types"
 	"github.com/coinbase/rosetta-sdk-go/client"
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
-	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/dcrutil/v4"
 )
 
 type dcrrosProc struct {

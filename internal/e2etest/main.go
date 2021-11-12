@@ -14,16 +14,20 @@ import (
 	"time"
 
 	"github.com/decred/dcrd/chaincfg/v3"
-	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/dcrutil/v4"
+	"github.com/decred/dcrd/txscript/v4/stdaddr"
+	"github.com/decred/dcrd/wire"
 )
 
 var (
 	chainParams      = chaincfg.SimNetParams()
-	prefundAddr, _   = dcrutil.DecodeAddress("SsaJzoa8kcRQEuoy3L4oV65YiioNmDuvdVk", chainParams)
+	prefundAddr, _   = stdaddr.DecodeAddress("SsaJzoa8kcRQEuoy3L4oV65YiioNmDuvdVk", chainParams)
 	prefundAmt       = dcrutil.Amount(100000000)
-	nonVotingPrivKey = "PsUS3CSq9iJkRi4GqHF8MttgPCTgTZda8ZLMqa3PCe2n7bV4pfK4a"
-	nonVotingAddr, _ = dcrutil.DecodeAddress("Ssiyo3v8KKDr7zJhi7VBFcrZMh49VarKVLd", chainParams)
-	targetAddr, _    = dcrutil.DecodeAddress("SsXiPL51iPAzsxfY84YEs1tQMoo9kfiCj5o", chainParams)
+	nonVotingAddr, _ = stdaddr.DecodeAddress("Ssiyo3v8KKDr7zJhi7VBFcrZMh49VarKVLd", chainParams)
+	targetAddr, _    = stdaddr.DecodeAddress("SsXiPL51iPAzsxfY84YEs1tQMoo9kfiCj5o", chainParams)
+
+	// revocationTx is filled by genTestChain().
+	revocationTx *wire.MsgTx
 
 	debugLevel = flag.String("debuglevel", "info", "logging level. Most common: warn,info,debug")
 	appData    = flag.String("appdata", "", "path for root data dir. Use a temp one if empty")

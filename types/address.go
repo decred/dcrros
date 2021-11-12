@@ -13,8 +13,8 @@ import (
 
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/v3"
-	"github.com/decred/dcrd/dcrutil/v3"
-	"github.com/decred/dcrd/txscript/v3"
+	"github.com/decred/dcrd/txscript/v4/stdaddr"
+	"github.com/decred/dcrd/txscript/v4/stdscript"
 )
 
 // TreasuryAccountAddress is the address used to represent the special treasury
@@ -23,7 +23,7 @@ const TreasuryAccountAdddress = "*treasury"
 
 // pkScriptToRawAccountAddr converts a given PkScript byte slice into a "raw"
 // dcrros address. A raw address is an hex-encoded string with the following
-// format 0x[2-byte-version][pktscript]
+// format 0x[2-byte-version][pkscript]
 func pkScriptToRawAccountAddr(version uint16, pkScript []byte) string {
 	addrBytes := make([]byte, 2+2*2+2*len(pkScript))
 	addrBytes[0] = 0x30 // "0"
@@ -63,25 +63,16 @@ func rawAccountAddrToPkScript(version uint16, addr string) ([]byte, error) {
 // standard string encoding and unrecognized scripts are converted to raw
 // format.
 func dcrPkScriptToAccountAddr(version uint16, pkScript []byte, chainParams *chaincfg.Params) (string, error) {
-	if version != 0 {
-		// Versions other than 0 aren't standardized yet, so return as
-		// a raw hex string with a "0x" prefix.
+	typ, addrs := stdscript.ExtractAddrs(version, pkScript, chainParams)
+	if typ == stdscript.STNonStandard || len(addrs) != 1 {
+		// The only current exception where typ != STNonStandard and
+		// len(addrs) > 1 is for 'bare' (non-P2SH) multisig, where it
+		// would be hard to determine which address has a given
+		// balance, so we also return a raw script in this case.
 		return pkScriptToRawAccountAddr(version, pkScript), nil
 	}
 
-	_, addrs, _, err := txscript.ExtractPkScriptAddrs(version, pkScript, chainParams, true)
-	if err != nil {
-		// Currently the only possible error is due to version != 0,
-		// which is handled above, but err on the side of caution.
-		return "", err
-	}
-
-	if len(addrs) != 1 {
-		// TODO: support 'bare' (non-p2sh) multisig?
-		return pkScriptToRawAccountAddr(version, pkScript), nil
-	}
-
-	saddr := addrs[0].Address()
+	saddr := addrs[0].String()
 	return saddr, nil
 }
 
@@ -107,16 +98,16 @@ func rosettaAccountToPkScript(account *rtypes.AccountIdentifier,
 	var pkscript []byte
 	var err error
 
-	// Versions other than 0 aren't standardized yet, so account
-	// addresseses using that should be decoded using that version or with
-	// an 0x prefix need are raw pk scripts.
+	// Versions other than 0 aren't standardized yet, so account addresses
+	// using that should be decoded using that version or with an 0x prefix
+	// need are raw pk scripts.
 	if version != 0 || strings.HasPrefix(account.Address, "0x") {
 		pkscript, err = rawAccountAddrToPkScript(version, account.Address)
 	} else {
-		var addr dcrutil.Address
-		addr, err = dcrutil.DecodeAddress(account.Address, chainParams)
+		var addr stdaddr.Address
+		addr, err = stdaddr.DecodeAddress(account.Address, chainParams)
 		if err == nil {
-			pkscript, err = txscript.PayToAddrScript(addr)
+			_, pkscript = addr.PaymentScript()
 		}
 	}
 

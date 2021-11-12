@@ -17,13 +17,13 @@ jobs:
         uses: actions/checkout@v2
         with:
           repository: decred/dcrd
-          ref: release-v1.6.2
+          ref: release-v1.7.0
           path: dcrd
       - name: Checkout dcrwallet
         uses: actions/checkout@v2
         with:
           repository: decred/dcrwallet
-          ref: release-v1.6.3
+          ref: release-v1.7.0
           path: dcrwallet
       - name: Checkout rosetta-cli
         uses: actions/checkout@v2

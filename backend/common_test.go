@@ -17,10 +17,10 @@ import (
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
-	"github.com/decred/dcrd/dcrjson/v3"
-	"github.com/decred/dcrd/dcrutil/v3"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
-	"github.com/decred/dcrd/txscript/v3"
+	"github.com/decred/dcrd/dcrjson/v4"
+	"github.com/decred/dcrd/dcrutil/v4"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
+	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/wire"
 	"github.com/stretchr/testify/require"
 )
@@ -106,8 +106,8 @@ func mustHex(s string) []byte {
 
 // mustAddr decodes the given string as a dcrutil.Address. It must only be used
 // with hardcoded values.
-func mustAddr(s string, chainParams *chaincfg.Params) dcrutil.Address {
-	addr, err := dcrutil.DecodeAddress(s, chainParams)
+func mustAddr(s string, chainParams *chaincfg.Params) stdaddr.Address {
+	addr, err := stdaddr.DecodeAddress(s, chainParams)
 	if err != nil {
 		panic(err)
 	}
@@ -253,11 +253,8 @@ func (mc *mockChain) txFromAddr(pkScript []byte, value, nb int64) blockMangler {
 
 // genDebit generates a valid debit for an output that can be found by the
 // GetRawTransaction call of the mock chain.
-func (mc *mockChain) genDebit(amt int64, addr dcrutil.Address) (*rtypes.Operation, *wire.TxIn) {
-	pkScript, err := txscript.PayToAddrScript(addr)
-	if err != nil {
-		mc.t.Fatal(err)
-	}
+func (mc *mockChain) genDebit(amt int64, addr stdaddr.Address) (*rtypes.Operation, *wire.TxIn) {
+	scriptVersion, pkScript := addr.PaymentScript()
 	amt2ros := types.DcrAmountToRosetta
 	prevHash := mc.addSudoTx(amt, pkScript)
 	debit := &rtypes.Operation{
@@ -268,9 +265,9 @@ func (mc *mockChain) genDebit(amt int64, addr dcrutil.Address) (*rtypes.Operatio
 			"sequence":  uint32(1000),
 		},
 		Account: &rtypes.AccountIdentifier{
-			Address: addr.Address(),
+			Address: addr.String(),
 			Metadata: map[string]interface{}{
-				"script_version": uint16(0),
+				"script_version": scriptVersion,
 			},
 		},
 		CoinChange: &rtypes.CoinChange{
@@ -295,11 +292,8 @@ func (mc *mockChain) genDebit(amt int64, addr dcrutil.Address) (*rtypes.Operatio
 }
 
 // genCredit generates a valid credit for an address.
-func (mc *mockChain) genCredit(amt int64, addr dcrutil.Address) (*rtypes.Operation, *wire.TxOut) {
-	pkScript, err := txscript.PayToAddrScript(addr)
-	if err != nil {
-		mc.t.Fatal(err)
-	}
+func (mc *mockChain) genCredit(amt int64, addr stdaddr.Address) (*rtypes.Operation, *wire.TxOut) {
+	scriptVersion, pkScript := addr.PaymentScript()
 	amt2ros := types.DcrAmountToRosetta
 	credit := &rtypes.Operation{
 		Type:   "credit",
@@ -308,9 +302,9 @@ func (mc *mockChain) genCredit(amt int64, addr dcrutil.Address) (*rtypes.Operati
 			"pk_script": pkScript,
 		},
 		Account: &rtypes.AccountIdentifier{
-			Address: addr.Address(),
+			Address: addr.String(),
 			Metadata: map[string]interface{}{
-				"script_version": uint16(0),
+				"script_version": scriptVersion,
 			},
 		},
 

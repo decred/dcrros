@@ -16,8 +16,9 @@ import (
 	"sync"
 	"time"
 
-	dcrwrpcclient "decred.org/dcrwallet/rpc/client/dcrwallet"
-	"github.com/decred/dcrd/dcrutil/v3"
+	dcrwrpcclient "decred.org/dcrwallet/v2/rpc/client/dcrwallet"
+	"github.com/decred/dcrd/dcrutil/v4"
+	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/jrick/wsrpc/v2"
 )
 
@@ -25,7 +26,7 @@ type dcrwProc struct {
 	c *dcrwrpcclient.Client
 }
 
-func (dcrw *dcrwProc) sendToAddr(ctx context.Context, addr dcrutil.Address, amount dcrutil.Amount) error {
+func (dcrw *dcrwProc) sendToAddr(ctx context.Context, addr stdaddr.Address, amount dcrutil.Amount) error {
 	_, err := dcrw.c.SendToAddress(ctx, addr, amount)
 	return err
 }
@@ -91,7 +92,7 @@ func (dcrw *dcrwProc) waitSynced(ctx context.Context, miner *dcrdProc) error {
 }
 
 func (dcrw *dcrwProc) selfTransferMany(ctx context.Context, nb int) error {
-	addrs := make(map[dcrutil.Address]dcrutil.Amount, 5)
+	addrs := make(map[stdaddr.Address]dcrutil.Amount, 5)
 	for j := 0; j < nb; j++ {
 		addr, err := dcrw.c.GetNewAddress(ctx, "default")
 		if err != nil {
