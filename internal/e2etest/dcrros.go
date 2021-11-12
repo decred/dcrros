@@ -146,6 +146,8 @@ func runDcrros(ctx context.Context, wg *sync.WaitGroup, rootAppData string, conn
 
 	if connectToMiner {
 		args = append(args, "--dcrdextraarg=\"--connect=127.0.0.1:19555\"")
+	} else {
+		args = append(args, "--offline")
 	}
 
 	dcrrosOutputFile, err := os.Create(filepath.Join(rootAppData, name+".log"))

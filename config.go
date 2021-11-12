@@ -120,6 +120,8 @@ type config struct {
 
 	RunDcrd       string   `long:"rundcrd" description:"Run the given dcrd binary and terminate dcrros if dcrd is killed"`
 	DcrdExtraArgs []string `long:"dcrdextraarg" description:"Extra arguments to provide to dcrd when running it"`
+	Offline       bool     `long:"offline" description:"Force dcrd to not connect to any peers"`
+
 	// Tuning
 
 	DBType          string `long:"dbtype" description:"Database backend to use for the Block Chain"`
@@ -188,6 +190,11 @@ func (c *config) dcrdArgs() []string {
 		args = append(args, "--rpclisten="+c.DcrdConnect)
 	}
 
+	if c.Offline {
+		args = append(args, "--connect=0.0.0.0")
+		args = append(args, "--nolisten")
+	}
+
 	args = append(args, c.DcrdExtraArgs...)
 
 	return args
@@ -249,6 +256,7 @@ func (c *config) serverConfig() (*backend.ServerConfig, error) {
 		DBDir:           dbDir,
 		CacheSizeBlocks: c.CacheSizeBlocks,
 		CacheSizeRawTxs: c.CacheSizeRawTxs,
+		KnownOffline:    c.Offline,
 	}, nil
 }
 

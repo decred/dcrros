@@ -86,6 +86,8 @@ type ServerConfig struct {
 	CacheSizeBlocks uint
 	CacheSizeRawTxs uint
 
+	KnownOffline bool
+
 	// The following fields are only defined during tests.
 
 	c           chain
@@ -100,13 +102,14 @@ type ServerConfig struct {
 // but rather relies on the fact that the underlying dcrd (or other node
 // implementation) _only_ generates valid chain data.
 type Server struct {
-	c           chain
-	chainParams *chaincfg.Params
-	asserter    *asserter.Asserter
-	network     *rtypes.NetworkIdentifier
-	db          backenddb.DB
-	dbType      DBType
-	peerTimeout time.Duration
+	c            chain
+	chainParams  *chaincfg.Params
+	asserter     *asserter.Asserter
+	network      *rtypes.NetworkIdentifier
+	db           backenddb.DB
+	dbType       DBType
+	peerTimeout  time.Duration
+	knownOffline bool
 
 	// concurrency is used to define how many goroutines are executed under
 	// certain situations.
@@ -171,6 +174,7 @@ func NewServer(cfg *ServerConfig) (*Server, error) {
 	s := &Server{
 		c:              cfg.c,
 		chainParams:    cfg.ChainParams,
+		knownOffline:   cfg.KnownOffline,
 		asserter:       astr,
 		network:        network,
 		cacheBlocks:    &cacheBlocks,
@@ -362,12 +366,15 @@ func (s *Server) Run(ctx context.Context) error {
 	if s.peerTimeout != 0 {
 		peerTimeout = s.peerTimeout
 	}
-	if err := s.waitForPeers(ctx, peerTimeout); err != nil {
+	if !s.knownOffline {
 		// Skip errNoPeersAfterTimeout since it means no peers were
 		// found (we're probably an offline node).
-		if !errors.Is(err, errNoPeersAfterTimeout) {
+		err := s.waitForPeers(ctx, peerTimeout)
+		if err != nil && !errors.Is(err, errNoPeersAfterTimeout) {
 			return err
 		}
+	} else {
+		svrLog.Infof("Skipping waiting for peers as we are known to be offline")
 	}
 	if err := s.waitForBlockchainSync(ctx); err != nil {
 		return err

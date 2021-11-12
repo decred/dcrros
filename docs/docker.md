@@ -46,6 +46,20 @@ $ docker run dcrros:stable --simnet
 
 If unspecified, then the container runs on **mainnet** by default.
 
+## Offline Mode
+
+When running an instance for tx construction and signing, it's usually
+preferable to run it without any network connections (maybe even on an airgapped
+setup).
+
+The docker image can run offline mode by specifying the `--offline` argument.
+Note that offline mode should be specified on an empty install, otherwise dcrros
+will attempt to maintain a synced blockchain.
+
+```shell
+$ docker run dcrros:stable --offline
+```
+
 ## Persisting data (volume)
 
 All data for `dcrros` and `dcrd` are saved in the `/data` dir of the container. Therefore, data can be persisted and externally accessed by mounting a volume on that path:
