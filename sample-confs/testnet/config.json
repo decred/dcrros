@@ -1,0 +1,57 @@
+{
+  "network": {
+    "blockchain": "decred",
+    "network": "testnet3"
+  },
+  "online_url": "http://localhost:19128",
+  "data_directory": "roscli-testnet-data/",
+  "http_timeout": 20,
+  "max_retries": 5,
+  "retry_elapsed_time": 0,
+  "max_online_connections": 130,
+  "max_sync_concurrency": 8,
+  "tip_delay": 120,
+  "log_configuration": false,
+  "data": {
+    "active_reconciliation_concurrency": 16,
+    "inactive_reconciliation_concurrency": 4,
+    "inactive_reconciliation_frequency": 250,
+    "log_blocks": false,
+    "log_transactions": false,
+    "log_balance_changes": false,
+    "log_reconciliations": false,
+    "ignore_reconciliation_error": false,
+    "exempt_accounts": "",
+    "bootstrap_balances": "",
+    "interesting_accounts": "",
+    "reconciliation_disabled": false,
+    "inactive_discrepency_search_disabled": false,
+    "balance_tracking_disabled": false,
+    "coin_tracking_disabled": false,
+    "results_output_file": "",
+    "historical_balance_enabled": true,
+    "end_conditions": {
+      "reconciliation_coverage": {
+        "coverage": 0.95,
+	"from_tip": true,
+        "tip": true
+      }
+    }
+  },
+  "construction": {
+    "offline_url": "http://localhost:19128",
+    "constructor_dsl_file": "decred.ros",
+    "max_offline_connections": 0,
+    "stale_depth": 0,
+    "broadcast_limit": 0,
+    "ignore_broadcast_failures": false,
+    "clear_broadcasts": false,
+    "broadcast_behind_tip": false,
+    "block_broadcast_limit": 0,
+    "rebroadcast_all": false,
+    "end_conditions": {
+      "create_account": 10,
+      "transfer": 10
+    }
+  }
+}

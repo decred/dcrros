@@ -1,16 +1,16 @@
 {
   "network": {
     "blockchain": "decred",
-    "network": "testnet3"
+    "network": "simnet"
   },
-  "online_url": "http://localhost:19128",
-  "data_directory": "roscli-testnet-data/",
-  "http_timeout": 20,
+  "online_url": "http://localhost:29128",
+  "data_directory": "roscli-simnet-data/",
+  "http_timeout": 10,
   "max_retries": 5,
   "retry_elapsed_time": 0,
-  "max_online_connections": 130,
-  "max_sync_concurrency": 8,
-  "tip_delay": 120,
+  "max_online_connections": 120,
+  "max_sync_concurrency": 64,
+  "tip_delay": 300,
   "log_configuration": false,
   "data": {
     "active_reconciliation_concurrency": 16,
@@ -33,8 +33,25 @@
     "end_conditions": {
       "reconciliation_coverage": {
         "coverage": 1.0,
+	"from_tip": true,
         "tip": true
-	}
+      }
+    }
+  },
+  "construction": {
+    "offline_url": "http://localhost:29128",
+    "constructor_dsl_file": "decred.ros",
+    "max_offline_connections": 0,
+    "stale_depth": 0,
+    "broadcast_limit": 0,
+    "ignore_broadcast_failures": false,
+    "clear_broadcasts": false,
+    "broadcast_behind_tip": false,
+    "block_broadcast_limit": 0,
+    "rebroadcast_all": false,
+    "end_conditions": {
+      "create_account": 10,
+      "transfer": 10
     }
   }
 }

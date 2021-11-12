@@ -18,8 +18,8 @@ $ ./contrib/dcr_tmux_simnet_setup.sh
 Next, run dcrros and perform the checks (from inside `dcrros` dir):
 
 ```shell
-$ go run . -C ./docs/simnet-tmux-dcrros.conf
-$ rosetta-cli --configuration-file docs/roscli-simnet.json check:data 
+$ go run . -C ./sample-confs/simnet/dcrros.conf
+$ rosetta-cli --configuration-file sample-confs/simnet/config.json check:data 
 ```
 
 To run `check:construction`, the simnet chain needs to be kept advancing and the
@@ -36,7 +36,7 @@ $ while true ; do ./mine && sleep 1s ; done
 Then start the `check:construction` tool:
 
 ```shell
-$ rosetta-cli --configuration-file docs/roscli-simnet.json check:construction
+$ rosetta-cli --configuration-file sample-confs/simnet/config.json check:construction
 ```
 
 The check tool will ask for funds on a generated address, like so:

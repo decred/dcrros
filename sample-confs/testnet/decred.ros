@@ -1,90 +1,3 @@
-// Copyright (c) 2021 The Decred developers
-// Use of this source code is governed by an ISC
-// license that can be found in the LICENSE file.
-
-package main
-
-import (
-	"os"
-	"path/filepath"
-)
-
-func genRosettaCLICfg(rootAppData string) error {
-	dataDir := filepath.Join(rootAppData, "rosetta-cli-data")
-	data := `
-{
-  "network": {
-    "blockchain": "decred",
-    "network": "simnet"
-  },
-  "online_url": "http://127.0.0.1:20100",
-  "data_directory": "` + dataDir + `",
-  "http_timeout": 10,
-  "max_retries": 5,
-  "retry_elapsed_time": 0,
-  "max_online_connections": 120,
-  "max_sync_concurrency": 64,
-  "tip_delay": 300,
-  "log_configuration": false,
-  "data": {
-    "active_reconciliation_concurrency": 16,
-    "inactive_reconciliation_concurrency": 4,
-    "inactive_reconciliation_frequency": 250,
-    "log_blocks": false,
-    "log_transactions": false,
-    "log_balance_changes": false,
-    "log_reconciliations": false,
-    "ignore_reconciliation_error": false,
-    "exempt_accounts": "",
-    "bootstrap_balances": "",
-    "interesting_accounts": "",
-    "reconciliation_disabled": false,
-    "inactive_discrepency_search_disabled": false,
-    "balance_tracking_disabled": false,
-    "coin_tracking_disabled": false,
-    "results_output_file": "",
-    "historical_balance_enabled": true,
-    "end_conditions": {
-      "reconciliation_coverage": {
-        "coverage": 1.0,
-        "tip": true
-      }
-    }
-  },
-  "construction": {
-    "constructor_dsl_file": "construction.ros",
-    "offline_url": "http://localhost:20103",
-    "max_offline_connections": 0,
-    "stale_depth": 0,
-    "broadcast_limit": 0,
-    "ignore_broadcast_failures": false,
-    "clear_broadcasts": false,
-    "broadcast_behind_tip": false,
-    "block_broadcast_limit": 0,
-    "rebroadcast_all": false,
-    "end_conditions": {
-      "create_account": 2,
-      "transfer": 10
-    },
-    "prefunded_accounts": [{
-      "privkey": "77561fd84f7e86e68b65e868324c390e9a5246f6eb9bf8f56c14d86511316f60",
-      "account_identifier": {
-        "address": "SsaJzoa8kcRQEuoy3L4oV65YiioNmDuvdVk",
-	"metadata": {
-          "script_version": 0
-	}
-      },
-      "curve_type": "secp256k1",
-      "currency": {
-        "symbol": "DCR",
-	"decimals": 8
-      }
-    }]
-  }
-}
-`
-
-	constructData := `
 request_funds(1){
   find_account{
     currency = {"symbol":"DCR", "decimals":8};
@@ -114,7 +27,7 @@ request_funds(1){
 
 create_account(1){
   create{
-    network = {"network":"simnet", "blockchain":"decred"};
+    network = {"network":"testnet3", "blockchain":"decred"};
     key = generate_key({"curve_type": "secp256k1"});
     account = derive({
       "network_identifier": {{network}},
@@ -132,7 +45,7 @@ create_account(1){
 
 transfer(10){
   transfer_dry_run{
-    transfer_dry_run.network = {"network":"simnet", "blockchain":"decred"};
+    transfer_dry_run.network = {"network":"testnet3", "blockchain":"decred"};
     currency = {"symbol":"DCR", "decimals":8};
 
     // We set the max_fee_amount to know how much buffer we should
@@ -253,7 +166,7 @@ transfer(10){
 
 return_funds(10){
   transfer_dry_run{
-    transfer_dry_run.network = {"network":"simnet", "blockchain":"decred"};
+    transfer_dry_run.network = {"network":"testnet3", "blockchain":"decred"};
     currency = {"symbol":"DCR", "decimals":8};
 
     // We look for a sender that is able to pay the
@@ -338,18 +251,4 @@ return_funds(10){
       }
     ];
   }
-}
-`
-
-	cfgFilePath := filepath.Join(rootAppData, "rosetta-cli.json")
-	if err := os.WriteFile(cfgFilePath, []byte(data), os.ModePerm); err != nil {
-		return err
-	}
-
-	constFilePath := filepath.Join(rootAppData, "construction.ros")
-	if err := os.WriteFile(constFilePath, []byte(constructData), os.ModePerm); err != nil {
-		return err
-	}
-
-	return nil
 }
