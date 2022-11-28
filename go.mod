@@ -6,7 +6,7 @@ require (
 	decred.org/dcrwallet/v2 v2.0.0
 	github.com/coinbase/rosetta-sdk-go v0.7.2
 	github.com/davecgh/go-spew v1.1.1
-	github.com/decred/dcrd v1.2.1-0.20220120180802-74a67dce2480
+	github.com/decred/dcrd v1.2.1-0.20221010183630-f886cda024a0
 	github.com/decred/dcrd/blockchain/stake/v4 v4.0.0
 	github.com/decred/dcrd/chaincfg/chainhash v1.0.3
 	github.com/decred/dcrd/chaincfg/v3 v3.1.1

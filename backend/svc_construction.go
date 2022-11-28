@@ -47,12 +47,12 @@ var _ rserver.ConstructionAPIServicer = (*Server)(nil)
 // The following metadata are *REQUIRED*:
 //
 //   - version (js number): Script Version to generate the address for. Only
-//   version 0 is currently supported.
+//     version 0 is currently supported.
 //
 // The following metadata are *OPTIONAL*:
 //
 //   - algo (js string): Either "ecdsa" or "schnorr" for secp256k1 curve keys.
-//   If unspecified, version 0 scripts generate an ecdsa key.
+//     If unspecified, version 0 scripts generate an ecdsa key.
 //
 // NOTE: This is part of the ConstructionAPIServicer interface.
 func (s *Server) ConstructionDerive(ctx context.Context,
@@ -201,14 +201,14 @@ func (s *Server) ConstructionMetadata(ctx context.Context,
 //
 // The underlying binary format is as follow:
 //
-//     version byte | binary tx | nb of prevouts | prevouts
+//	version byte | binary tx | nb of prevouts | prevouts
 //
 // - [version byte]: 1 byte version
 // - [binary tx]: wire tx, serialized in the standard way
 // - [nb of prevouts]: varint with number of previous outpoits
 // - [prevouts]: variable list of prevouts. Each one is serialized as follows:
 //
-//     amount | version | pk script len | pkscript
+//	amount | version | pk script len | pkscript
 //
 // - [amount]: 8 byte uint64 amount
 // - [version]: 2 byte uint16 version

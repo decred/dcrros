@@ -115,8 +115,8 @@ github.com/dchest/siphash v1.2.2/go.mod h1:q+IRvb2gOSrUnYoPqHiyHXS0FOBBOdl6tONBl
 github.com/deckarep/golang-set v0.0.0-20180603214616-504e848d77ea/go.mod h1:93vsz/8Wt4joVM7c2AVqh+YRMiUSc14yDtF28KmMOgQ=
 github.com/decred/base58 v1.0.3 h1:KGZuh8d1WEMIrK0leQRM47W85KqCAdl2N+uagbctdDI=
 github.com/decred/base58 v1.0.3/go.mod h1:pXP9cXCfM2sFLb2viz2FNIdeMWmZDBKG3ZBYbiSM78E=
-github.com/decred/dcrd v1.2.1-0.20220120180802-74a67dce2480 h1:1FnkGBfvIepIDV5rSYztB9TBxBGsvFrYh2qqPEO8wr4=
-github.com/decred/dcrd v1.2.1-0.20220120180802-74a67dce2480/go.mod h1:hwdNXscHt9DzjNq2E5wgOc9GAb+vcoyc3VfVP+yaHwc=
+github.com/decred/dcrd v1.2.1-0.20221010183630-f886cda024a0 h1:uit/2Eqbvq2r0koBDdUV1aJqNnQCAZzvNlvaV7vfrlU=
+github.com/decred/dcrd v1.2.1-0.20221010183630-f886cda024a0/go.mod h1:qWQzw6wUh94pXN7mQQx0hCh73TjmHXSqU3ytgMC299w=
 github.com/decred/dcrd/addrmgr/v2 v2.0.0/go.mod h1:5g9jPzBSQotmSnPri4oc1n5VVgWzPLlXwbr6HGoUVrg=
 github.com/decred/dcrd/bech32 v1.1.2/go.mod h1:5Eng/MFsKR8KKDeSxGZdYpGs8CIKxiedcqYddVqQuj0=
 github.com/decred/dcrd/blockchain/stake/v4 v4.0.0 h1:PwoCjCTbRvDUZKKs6N2Haus8XcbVXCJ9iGVs8C9sKwQ=
@@ -124,6 +124,7 @@ github.com/decred/dcrd/blockchain/stake/v4 v4.0.0/go.mod h1:bOgG7YTbTOWQgtHLL2l1
 github.com/decred/dcrd/blockchain/standalone/v2 v2.1.0 h1:aXh7a+86p+H65MGy0QKu4Juf3/j+Y5koVSyVYFMdqP0=
 github.com/decred/dcrd/blockchain/standalone/v2 v2.1.0/go.mod h1:t2qaZ3hNnxHZ5kzVJDgW5sp47/8T5hYJt7SR+/JtRhI=
 github.com/decred/dcrd/blockchain/v4 v4.0.0/go.mod h1:i1FeTNN0LUEWBSMoI3riAFgfVE1X/7Seoz1aJ7YQGbk=
+github.com/decred/dcrd/blockchain/v4 v4.1.0/go.mod h1:i1FeTNN0LUEWBSMoI3riAFgfVE1X/7Seoz1aJ7YQGbk=
 github.com/decred/dcrd/certgen v1.1.1 h1:MYPG5jCysnbF4OiJ1++YumFEu2p/MsM/zxmmqC9mVFg=
 github.com/decred/dcrd/certgen v1.1.1/go.mod h1:ivkPLChfjdAgFh7ZQOtl6kJRqVkfrCq67dlq3AbZBQE=
 github.com/decred/dcrd/chaincfg/chainhash v1.0.2/go.mod h1:BpbrGgrPTr3YJYRN3Bm+D9NuaFd+zGyNeIKgrhCXK60=
