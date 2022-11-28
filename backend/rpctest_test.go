@@ -22,15 +22,15 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/decred/dcrd/dcrutil/v4"
 	"github.com/decred/dcrd/rpcclient/v8"
-	"github.com/decred/dcrd/rpctest"
 	"github.com/decred/dcrd/txscript/v4"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
 	"github.com/decred/dcrd/wire"
+	"github.com/decred/dcrtest/dcrdtest"
 	"github.com/stretchr/testify/require"
 )
 
-// rpctestHarness generates an rpctest harness used for tests.
-func rpctestHarness(t *testing.T, net *chaincfg.Params, name string) *rpctest.Harness {
+// rpctestHarness generates a dcrdtest harness used for tests.
+func rpctestHarness(t *testing.T, net *chaincfg.Params, name string) *dcrdtest.Harness {
 	var handlers *rpcclient.NotificationHandlers
 
 	// Setup the log dir for tests to ease debugging after failures.
@@ -55,9 +55,9 @@ func rpctestHarness(t *testing.T, net *chaincfg.Params, name string) *rpctest.Ha
 		}
 	}
 
-	// Create the rpctest harness and mine outputs for the voting wallet to
+	// Create the dcrdtest harness and mine outputs for the voting wallet to
 	// use.
-	hn, err := rpctest.New(t, net, handlers, extraArgs)
+	hn, err := dcrdtest.New(t, net, handlers, extraArgs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,11 +74,11 @@ func rpctestHarness(t *testing.T, net *chaincfg.Params, name string) *rpctest.Ha
 //
 // name is used to disambiguate when multiple harnesses are used in the same
 // test.
-func rpctestHarnessAndVW(t *testing.T, net *chaincfg.Params, name string) (*rpctest.Harness, *rpctest.VotingWallet) {
+func rpctestHarnessAndVW(t *testing.T, net *chaincfg.Params, name string) (*dcrdtest.Harness, *dcrdtest.VotingWallet) {
 	hn := rpctestHarness(t, net, name)
 
 	// Generate funds for the voting wallet.
-	_, err := rpctest.AdjustedSimnetMiner(testCtx(t), hn.Node, 64)
+	_, err := dcrdtest.AdjustedSimnetMiner(testCtx(t), hn.Node, 64)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func rpctestHarnessAndVW(t *testing.T, net *chaincfg.Params, name string) (*rpct
 	// Create the voting wallet.
 	vwCtx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	vw, err := rpctest.NewVotingWallet(vwCtx, hn)
+	vw, err := dcrdtest.NewVotingWallet(vwCtx, hn)
 	if err != nil {
 		t.Fatalf("unable to create voting wallet for test: %v", err)
 	}
@@ -98,7 +98,7 @@ func rpctestHarnessAndVW(t *testing.T, net *chaincfg.Params, name string) (*rpct
 		t.Fatalf("voting wallet errored: %v", vwerr)
 	})
 	vw.SetMiner(func(ctx context.Context, nb uint32) ([]*chainhash.Hash, error) {
-		return rpctest.AdjustedSimnetMiner(ctx, hn.Node, nb)
+		return dcrdtest.AdjustedSimnetMiner(ctx, hn.Node, nb)
 	})
 
 	return hn, vw
@@ -108,7 +108,7 @@ func rpctestHarnessAndVW(t *testing.T, net *chaincfg.Params, name string) (*rpct
 // connecting to a running dcrd instance.
 func TestCheckDcrdSimnet(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping rpctest")
+		t.Skip("skipping dcrdtest")
 	}
 
 	net := chaincfg.SimNetParams()
@@ -136,7 +136,7 @@ func testSimnetBalances(t *testing.T, db backenddb.DB) {
 	// a reorg test.
 	hn, vw := rpctestHarnessAndVW(t, net, "main")
 	hnOther, vwOther := rpctestHarnessAndVW(t, net, "other")
-	err := rpctest.ConnectNode(testCtx(t), hn, hnOther)
+	err := dcrdtest.ConnectNode(testCtx(t), hn, hnOther)
 	require.NoError(t, err)
 
 	// Create a privkey and p2pkh addr we control for use in the tests.
@@ -362,7 +362,7 @@ func testSimnetBalances(t *testing.T, db backenddb.DB) {
 
 	// Disconnect hn and hnOther so we'll test a reorg that will drop
 	// spendTx.
-	err = rpctest.RemoveNode(testCtx(t), hn, hnOther)
+	err = dcrdtest.RemoveNode(testCtx(t), hn, hnOther)
 	require.NoError(t, err)
 
 	// Publish and mine the tx.
@@ -382,9 +382,9 @@ func testSimnetBalances(t *testing.T, db backenddb.DB) {
 	// Generate a reorg and reconnect the nodes to drop spendTx from
 	// account balance calcs.
 	vwOther.GenerateBlocks(testCtx(t), 3)
-	err = rpctest.ConnectNode(testCtx(t), hn, hnOther)
+	err = dcrdtest.ConnectNode(testCtx(t), hn, hnOther)
 	require.NoError(t, err)
-	err = rpctest.JoinNodes(testCtx(t), []*rpctest.Harness{hn, hnOther}, rpctest.Blocks)
+	err = dcrdtest.JoinNodes(testCtx(t), []*dcrdtest.Harness{hn, hnOther}, dcrdtest.Blocks)
 	require.NoError(t, err)
 
 	// Ensure the balance reflects the fact that the coins have not been
@@ -733,6 +733,6 @@ func TestSimnetConstructionInteraction(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	rpctest.SetPathToDCRD("dcrd")
+	dcrdtest.SetPathToDCRD("dcrd")
 	os.Exit(m.Run())
 }

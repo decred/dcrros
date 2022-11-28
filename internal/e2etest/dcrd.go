@@ -18,7 +18,7 @@ import (
 	"github.com/decred/dcrd/dcrutil/v4"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v4"
 	"github.com/decred/dcrd/rpcclient/v8"
-	"github.com/decred/dcrd/rpctest"
+	"github.com/decred/dcrtest/dcrdtest"
 )
 
 type dcrdProc struct {
@@ -50,7 +50,7 @@ func (d *dcrdProc) waitTxInMempool(ctx context.Context, txh string) error {
 func (d *dcrdProc) mine(ctx context.Context, nb uint32) ([]*chainhash.Hash, error) {
 	blocks := make([]*chainhash.Hash, nb)
 	for i := uint32(0); i < nb; i++ {
-		bl, err := rpctest.AdjustedSimnetMiner(ctx, d.c, 1)
+		bl, err := dcrdtest.AdjustedSimnetMiner(ctx, d.c, 1)
 		if err != nil {
 			return nil, err
 		}
@@ -217,7 +217,7 @@ func runMainMiner(ctx context.Context, wg *sync.WaitGroup, rootAppData string) (
 	}
 
 	// Generate enough blocks to get to Stake Enable Height.
-	if _, err := rpctest.AdjustedSimnetMiner(ctx, client, 33); err != nil {
+	if _, err := dcrdtest.AdjustedSimnetMiner(ctx, client, 33); err != nil {
 		return nil, err
 	}
 
