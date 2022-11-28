@@ -39,10 +39,6 @@ func (dcrw *dcrwProc) importPrivKey(ctx context.Context, wif string) error {
 	return dcrw.c.ImportPrivKey(ctx, w)
 }
 
-func (dcrw *dcrwProc) rescanWallet(ctx context.Context) error {
-	return dcrw.c.Call(ctx, "rescanwallet", nil)
-}
-
 func (dcrw *dcrwProc) nbUtxos(ctx context.Context) (int, error) {
 	utxos, err := dcrw.c.ListUnspentMin(ctx, 1)
 	if err != nil {
@@ -138,32 +134,6 @@ func (dcrw *dcrwProc) genManyUtxos(ctx context.Context, miner *dcrdProc) error {
 	dcrw.logSpendableUtxos(ctx)
 
 	return nil
-}
-
-func (dcrw *dcrwProc) fillTicketPool(ctx context.Context, miner *dcrdProc) error {
-	for {
-		liveTickets, err := miner.c.LiveTickets(ctx)
-		if err != nil {
-			return err
-		}
-
-		if len(liveTickets) > 64 {
-			log.Debugf("Filled ticket pool with %d tickets", len(liveTickets))
-			return nil
-		}
-
-		nbTickets := 10
-		_, err = dcrw.c.PurchaseTicket(ctx, "default", 100e8, nil, nonVotingAddr, &nbTickets,
-			nil, nil, nil, nil, nil)
-		if err != nil {
-			return err
-		}
-
-		if _, err := miner.mine(ctx, 1); err != nil {
-			return err
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
 }
 
 func runMainWallet(ctx context.Context, wg *sync.WaitGroup, rootAppData string) (*dcrwProc, error) {

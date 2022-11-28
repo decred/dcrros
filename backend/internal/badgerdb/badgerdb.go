@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 
 	"decred.org/dcrros/backend/backenddb"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -32,8 +31,7 @@ func (tx *transaction) Writable() bool {
 }
 
 type BadgerDB struct {
-	mtx sync.Mutex
-	db  *badger.DB
+	db *badger.DB
 }
 
 // NewBadgerDB creates a new instance of a backenddb.DB implementation backed

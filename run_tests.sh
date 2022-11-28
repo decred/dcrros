@@ -60,7 +60,7 @@ for module in $MODPATHS; do
       --enable=ineffassign \
       --enable=govet \
       --enable=misspell \
-      --enable=deadcode \
+      --enable=unused
   )
 done
 
