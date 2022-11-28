@@ -16,8 +16,8 @@ import (
 
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrutil/v4"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
-	"github.com/decred/dcrd/rpcclient/v7"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v4"
+	"github.com/decred/dcrd/rpcclient/v8"
 	"github.com/decred/dcrd/rpctest"
 )
 

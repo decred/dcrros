@@ -6,14 +6,14 @@
 # code.
 
 # Stage 1: Build the bins in a golang image.
-FROM golang:1.17-buster AS builder
+FROM golang:1.19-buster AS builder
 
 # Build dcrd, dcrwallet, dcrros and include dcrctl as well.
 #
 # Versions for the bins are updated as required by the current master version
 # of dcrros.
 RUN git clone https://github.com/decred/dcrd
-RUN (cd dcrd && git checkout release-v1.7.5 && go install .)
+RUN (cd dcrd && git checkout fc017ce3bb3bba23d5a599eb948c1b74ea54b4f5 && go install .)
 RUN git clone https://github.com/decred/dcrwallet
 RUN (cd dcrwallet && git checkout release-v1.7.5 && go install .)
 RUN git clone https://github.com/coinbase/rosetta-cli

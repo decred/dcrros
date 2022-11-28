@@ -9,7 +9,7 @@ import (
 	"fmt"
 
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
-	"github.com/decred/dcrd/blockchain/stake/v4"
+	"github.com/decred/dcrd/blockchain/stake/v5"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrutil/v4"
@@ -135,23 +135,6 @@ func (op *Op) ROp() *rtypes.Operation {
 
 type BlockOpCb = func(op *Op) error
 
-// determineTxType tries to identify the type of transaction. It uses safe
-// values for the agenda activation flags.
-func determineTxType(tx *wire.MsgTx) stake.TxType {
-	// It's safe to always pass true to treasuryActive because it only
-	// detects additional tx types that can't be found in the blockchain
-	// before it's actually activated. Therefore, passing true always
-	// works.
-	treasuryActive := true
-
-	// The autorevocation agenda adds _additional_ constraints to
-	// revocation txs, so passing false always identifies both pre- and
-	// post- autorevocation revoke transactions that are in the blockchain.
-	noAutoRevoke := false
-
-	return stake.DetermineTxType(tx, treasuryActive, noAutoRevoke)
-}
-
 // iterateBlockOpsInTx iterates over all Rosetta-reprenstable operations in the
 // given transaction.
 //
@@ -170,7 +153,7 @@ func iterateBlockOpsInTx(op *Op, fetchPrevOuts PrevOutputsFetcher, applyOp Block
 
 	tx := op.Tx
 	isStake := op.Tree == wire.TxTreeStake
-	txType := determineTxType(tx)
+	txType := stake.DetermineTxType(tx)
 	isVote := txType == stake.TxTypeSSGen
 	isCoinbase := !isStake && txType == stake.TxTypeRegular && op.TxIndex == 0
 
@@ -520,7 +503,7 @@ func MempoolTxToRosetta(tx *wire.MsgTx, fetchPrevOuts PrevOutputsFetcher,
 		return nil
 	}
 
-	txType := determineTxType(tx)
+	txType := stake.DetermineTxType(tx)
 	tree := wire.TxTreeRegular
 	if txType != stake.TxTypeRegular {
 		tree = wire.TxTreeStake

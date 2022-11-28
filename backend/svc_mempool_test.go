@@ -13,7 +13,7 @@ import (
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v4"
 	"github.com/decred/dcrd/wire"
 	"github.com/stretchr/testify/require"
 )

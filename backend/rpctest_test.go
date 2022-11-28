@@ -21,7 +21,7 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/decred/dcrd/dcrutil/v4"
-	"github.com/decred/dcrd/rpcclient/v7"
+	"github.com/decred/dcrd/rpcclient/v8"
 	"github.com/decred/dcrd/rpctest"
 	"github.com/decred/dcrd/txscript/v4"
 	"github.com/decred/dcrd/txscript/v4/stdaddr"
@@ -61,7 +61,7 @@ func rpctestHarness(t *testing.T, net *chaincfg.Params, name string) *rpctest.Ha
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = hn.SetUp(false, 0)
+	err = hn.SetUp(context.Background(), false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,11 +84,13 @@ func rpctestHarnessAndVW(t *testing.T, net *chaincfg.Params, name string) (*rpct
 	}
 
 	// Create the voting wallet.
-	vw, err := rpctest.NewVotingWallet(context.Background(), hn)
+	vwCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	vw, err := rpctest.NewVotingWallet(vwCtx, hn)
 	if err != nil {
 		t.Fatalf("unable to create voting wallet for test: %v", err)
 	}
-	err = vw.Start()
+	err = vw.Start(vwCtx)
 	if err != nil {
 		t.Fatalf("unable to setup voting wallet: %v", err)
 	}
@@ -134,7 +136,7 @@ func testSimnetBalances(t *testing.T, db backenddb.DB) {
 	// a reorg test.
 	hn, vw := rpctestHarnessAndVW(t, net, "main")
 	hnOther, vwOther := rpctestHarnessAndVW(t, net, "other")
-	err := rpctest.ConnectNode(hn, hnOther)
+	err := rpctest.ConnectNode(testCtx(t), hn, hnOther)
 	require.NoError(t, err)
 
 	// Create a privkey and p2pkh addr we control for use in the tests.
@@ -255,7 +257,7 @@ func testSimnetBalances(t *testing.T, db backenddb.DB) {
 	// can process an already started blockchain.
 	coin := int64(1e8)
 	txOut := &wire.TxOut{PkScript: p2pkhScript, Value: coin}
-	txh, err := hn.SendOutputs([]*wire.TxOut{txOut}, defaultFeeRate)
+	txh, err := hn.SendOutputs(testCtx(t), []*wire.TxOut{txOut}, defaultFeeRate)
 	addWantUtxo(txh, 0, coin)
 	require.NoError(t, err)
 	_, err = vw.GenerateBlocks(testCtx(t), 5)
@@ -315,7 +317,7 @@ func testSimnetBalances(t *testing.T, db backenddb.DB) {
 
 	// Send more coins to the address and ensure the tx is found in the
 	// mempool.
-	sentTxHash, err := hn.SendOutputs([]*wire.TxOut{txOut}, defaultFeeRate)
+	sentTxHash, err := hn.SendOutputs(testCtx(t), []*wire.TxOut{txOut}, defaultFeeRate)
 	require.NoError(t, err)
 	resMempool, rerr := svr.Mempool(testCtx(t), &rtypes.NetworkRequest{})
 	require.Nil(t, rerr)
@@ -380,9 +382,9 @@ func testSimnetBalances(t *testing.T, db backenddb.DB) {
 	// Generate a reorg and reconnect the nodes to drop spendTx from
 	// account balance calcs.
 	vwOther.GenerateBlocks(testCtx(t), 3)
-	err = rpctest.ConnectNode(hn, hnOther)
+	err = rpctest.ConnectNode(testCtx(t), hn, hnOther)
 	require.NoError(t, err)
-	err = rpctest.JoinNodes([]*rpctest.Harness{hn, hnOther}, rpctest.Blocks)
+	err = rpctest.JoinNodes(testCtx(t), []*rpctest.Harness{hn, hnOther}, rpctest.Blocks)
 	require.NoError(t, err)
 
 	// Ensure the balance reflects the fact that the coins have not been
@@ -481,7 +483,7 @@ func testSimnetConstructionInteraction(t *testing.T, db backenddb.DB) {
 
 	// Generate outputs that can be spent in the online chain.
 	txOutEcdsaSecp256k1 := &wire.TxOut{PkScript: pksEcdsaSecp256k1, Value: coinAmt}
-	txhEcdsaSecp256k1, err := hnOnline.SendOutputs([]*wire.TxOut{txOutEcdsaSecp256k1}, defaultFeeRate)
+	txhEcdsaSecp256k1, err := hnOnline.SendOutputs(testCtx(t), []*wire.TxOut{txOutEcdsaSecp256k1}, defaultFeeRate)
 	require.NoError(t, err)
 	outpointEcdsaSecp256k1 := wire.OutPoint{
 		Hash:  *txhEcdsaSecp256k1,

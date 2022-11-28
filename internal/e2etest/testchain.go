@@ -12,10 +12,10 @@ import (
 
 	"decred.org/dcrros/types"
 	walletjson "decred.org/dcrwallet/v2/rpc/jsonrpc/types"
-	"github.com/decred/dcrd/blockchain/stake/v4"
+	"github.com/decred/dcrd/blockchain/stake/v5"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrutil/v4"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v4"
 	"github.com/decred/dcrd/txscript/v4/stdscript"
 	"github.com/decred/dcrd/wire"
 )
@@ -136,7 +136,7 @@ func ensureTicketRevoked(ctx context.Context, miner *dcrdProc, wallet *dcrwProc,
 				return err
 			}
 			for _, stx := range block.STransactions {
-				if !stake.IsSSRtx(stx, true) {
+				if !stake.IsSSRtx(stx) {
 					continue
 				}
 
@@ -190,7 +190,7 @@ func ensureTicketRevoked(ctx context.Context, miner *dcrdProc, wallet *dcrwProc,
 			return err
 		}
 		for _, stx := range lastBlock.STransactions {
-			if !stake.IsSSRtx(stx, true) {
+			if !stake.IsSSRtx(stx) {
 				continue
 			}
 
@@ -572,7 +572,7 @@ func checkTestChain(ctx context.Context, dcrros *dcrrosProc, miner *dcrdProc, wa
 	// Find a vote in the last block and verify its balance is correct.
 	foundVote := false
 	for _, tx := range lastBlock.STransactions {
-		if !stake.IsSSGen(tx, true) {
+		if !stake.IsSSGen(tx) {
 			continue
 		}
 

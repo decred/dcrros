@@ -6,7 +6,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go: [1.16, 1.17]
+        go: [1.18, 1.19]
     env:
       GO111MODULE: "on"
     steps:
@@ -33,7 +33,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           repository: decred/dcrd
-          ref: release-v1.7.5
+          ref: fc017ce3bb3bba23d5a599eb948c1b74ea54b4f5
           path: dcrd
 
       - name: Install dcrd

@@ -17,8 +17,8 @@ import (
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrjson/v4"
 	"github.com/decred/dcrd/dcrutil/v4"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
-	"github.com/decred/dcrd/rpcclient/v7"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v4"
+	"github.com/decred/dcrd/rpcclient/v8"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -27,7 +27,7 @@ const (
 	// instance should be running on. These are interpreted according to
 	// semver, so any difference in major versions causes an error while we
 	// accept any minor version greater than or equal to the minimum.
-	wantJsonRpcMajor uint32 = 7
+	wantJsonRpcMajor uint32 = 8
 	wantJsonRpcMinor uint32 = 0
 )
 

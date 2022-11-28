@@ -21,7 +21,7 @@ import (
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/lru"
-	"github.com/decred/dcrd/rpcclient/v7"
+	"github.com/decred/dcrd/rpcclient/v8"
 	"github.com/decred/dcrd/wire"
 )
 

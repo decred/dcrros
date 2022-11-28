@@ -12,7 +12,7 @@ import (
 	rtypes "github.com/coinbase/rosetta-sdk-go/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrjson/v4"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v4"
 )
 
 var _ rserver.MempoolAPIServicer = (*Server)(nil)

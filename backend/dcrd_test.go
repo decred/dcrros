@@ -16,7 +16,7 @@ import (
 	"decred.org/dcrros/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v4"
 	"github.com/stretchr/testify/require"
 )
 

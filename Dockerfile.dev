@@ -3,12 +3,12 @@
 # images themselves.
 
 # Stage 1: Build the bins in a golang image.
-FROM golang:1.17-buster AS builder
+FROM golang:1.19-buster AS builder
 
 # Build the latest compatible dcrd and dcrctl. Comment the checkout lines to use
 # the latest master.
 RUN git clone https://github.com/decred/dcrd
-RUN (cd dcrd && git checkout release-v1.7.5)
+RUN (cd dcrd && git checkout fc017ce3bb3bba23d5a599eb948c1b74ea54b4f5)
 RUN (cd dcrd && go install .)
 RUN git clone https://github.com/decred/dcrctl
 RUN (cd dcrctl && git checkout release-v1.7.5)
